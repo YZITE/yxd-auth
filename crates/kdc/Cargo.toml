@@ -1,0 +1,10 @@
+[package]
+name = "yxd-auth-kdc"
+description = "YXD auth key distribution center (T3P)"
+version = "0.0.0"
+authors = ["Erik Zscheile <zseri.devel@ytrizja.de>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+yxd-auth-core = { path = "../core" }

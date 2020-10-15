@@ -1,0 +1,255 @@
+Ziel: Authentifizierung mit abgeleiteten Schlüsseln.
+
+Hinweise zur Ablaufdarstellung:
+  Im Fehlerfall bricht der Client den kompletten Prozess ab
+  und revoked bereits ausgestellte Tickets, sofern nicht anders angegeben.
+
+Abkürzungen:
+  T3P ... Trusted 3rd-Party
+  SRV ... Service
+  CLT ... User / Nutzer / Client
+    $ ... variable
+    ? ... zero or one
+    * ... zero, one or more
+    + ... one or more
+
+Ablauf:
+  1. Nutzer authentifiziert sich bei Trusted 3rd-Party (T3P)
+    CLT <-> T3P : session init (Noise), encrypt with pubkey of T3P,
+      server verifies identity of client (optional)
+
+    CLT  -> T3P : auth username, pw: password
+    CLT <-  T3P : result <(),()> (was auth successful)
+                (boolean, possible with additional resp params)
+                connection is closed if failure -> abort
+
+  2. (optional) Nutzer fragt Sitzungsticket an
+    CLT  -> T3P : aquire ticket, LIFETIME?, DELEGATE*
+              implicit: the session ticket is pinned to the client pubkey
+    CLT <-  T3P : result <blob:$sticket, err>
+
+      the client could now close the connection and resume it later
+      by providing username + the session ticket to the T3P
+    (ex:
+    CLT  -> T3P : auth username, sessticket $sticket
+    )
+      if the user does not use a session ticket,
+      all issued tickets in this session will be
+      invalidated if the connection ends.
+
+  3. (optional) Nutzer fragt pubkey von Service bei T3P an
+    CLT  -> T3P : get srv $srv info pubkey
+    CLT <-  T3P : result <blob:$pubkey, err>
+
+  4. Nutzer baut Verbindung zum Service auf
+    CLT <-> SRV : session init (Noise), encrypt with $pubkey
+      (client holds connection open)
+
+  5. Nutzer fragt Serviceticket an
+    CLT  -> T3P : aquire ticket, LIFETIME?, SRV-PUBKEY?
+    CLT <-  T3P : result <blob:$ticket, err>
+
+  6. Nutzer authentifiziert sich beim Service
+    CLT  -> SRV : auth username, servticket $ticket
+                  SRV: the service checks if the username domain is
+                  configured (if not, goto 8b)
+
+  7. Service prüft Ticket über T3P (welcher via Domain gefunden wird)
+    SRV <-> T3P : session init (Noise), encrypt with pubkey of T3P
+    SRV  -> T3P : check username, servticket $ticket
+    SRV <-  T3P : result <(),()> (is ticket valid -> $tiv)
+
+      if this check returns invalid, which may happen even if the ticket
+      was valid, but either
+       - the service pubkey mismatches or
+       - the username mismatches
+      then the ticket is invalidated,
+      and won't be accepted in any further attempts, as it may be leaked.
+
+    SRV  -> T3P : quit
+                  (SRV-T3P connection is now closed)
+
+      if $tiv: goto 8a.
+      else   : goto 8b.
+
+  8a. Nutzer ist authentifiziert
+    CLT <-  SRV : result <(), !>
+
+    CLT <-> SRV : ... [authenticated payload] ...
+
+  8b. Nutzer ist nicht authentifiziert
+    CLT <-  SRV : result <!, err>
+
+  9. Fertig
+    CLT  -> SRV : quit
+                  (CLT-SRV connection is now closed)
+
+    CLT  -> T3P : revoke $ticket (id)
+    CLT <-  T3P : result <(), ()>
+    CLT  -> T3P : revoke $sticket (id)
+    CLT <-  T3P : result <(), ()>
+    CLT  -> T3P : quit
+                  (CLT-T3P connection is now closed)
+
+Alternativen:
+  - Ticket-Gültigkeit soll in einfachen Fällen auch nachprüfbar sein,
+    ohne den T3P dazu "befragen" zu müssen.
+    daher: Ticket mit T3P.privkey signieren, kann mit T3P.pubkey
+    nachgeprüft werden.
+
+Commands:
+
+  AUTH:
+    if this command is sent in an already authenticated session,
+    the session is shut down and the client is re-authenticated.
+
+    : auth username $user $domain
+      authenticates with the specified user and domain
+      fails if the server doesn't know the domain
+
+    (only one of the following:)
+
+    : auth password $password    [password in cleartext]
+
+    : auth sessticket $sessticket
+
+  ACQUIRE-TICKET: acquire ticket, LIFETIME*, DELEGATE*
+    the T3P MAY disallow issuing tickets without specified
+    delegates, and it MAY specify a maximum lifetime
+    (rule ONLY-INTERSECTION applies).
+
+  REVOKE-TICKET: revoke ticket $ticket
+
+  RENEW-TICKET: renew ticket $ticket
+    returns a new ticket with the creation time set to the
+    current time.
+
+  GET: get $categ $object $role $prop
+    # examples:
+    (these are authenticated with an ACL)
+
+    : get srv $srv info pubkey
+      retrieve the public key for the service $srv
+
+    : get user $user info groups
+      retrieve the groups in which the user resides
+
+    # example ACL:
+    ```
+    srv ...PUBKEY... : allow : user * info groups
+    ```
+
+Option markers (only structure/compile-time):
+  see also "Options"
+
+  ONLY-INTERSECTION:
+    the real, applied value is always the intersection
+    between the parent ticket and the new ticket.
+    (exceptions for the initial session may apply).
+
+Ticket data:
+  see also "Options"
+
+  FLAGS: flags[bitflags] $flag+ -> [$int]
+    # available $flag's: (bool = set or unset)
+    - INVALID (implicit)
+    - ALLOW-DERIVE
+      = the ticket may be used to get derived tickets from
+        the T3P
+    - ALLOW-LIMITED-EXPAND
+      = the ticket may be used to modify itself
+        (expand lifetimes, delegates, roles),
+        and to do the same to derived tickets,
+        but only up to the restrictions of the
+        parent ticket
+    - ALLOW-EXPAND
+      = the ticket may be used to modify itself
+        (expand allow flags, lifetimes, delegates, roles),
+        and to do the same to derived tickets,
+        even at creation time
+
+  CREATION:
+    : creation time $timestamp
+
+  LAST-VALIDATED (optional):
+    : last validation time $timestamp
+      MUST be >= 'creation time' if present
+
+  LIFETIME*:
+    : lifetime after $timestamp
+    : lifetime until $timestamp
+
+  VALIDITY-CHECK-INTERVAL?:
+    : vchk interval $duration
+      the ticket SHOULD be checked every $duration
+      if it is still valid via T3P;
+      if this interval is passed since the 'last validation time'
+      (or 'last validation time' in not set),
+      it MUST be checked via T3P before it can be accepted.
+
+  LIFETIME-RENEW?:
+    : lifetime renew until $timestamp
+    (only if this is set the ticket can be renewed)
+
+  DELEGATE*: allow delegate pubkey §pubkey PIN-PUBKEY*
+
+  ROLES: roles $role+
+
+Options:
+
+  LIFETIME*:
+    it is possible to send multiple of these,
+      in that case the intersection of all statements
+    = the most narrow lifetime is applied.
+
+    * ONLY-INTERSECTION
+
+    : lifetime after $timestamp
+      restricts lifetime of ticket to be only valid
+      after $timestamp has passed (inclusive).
+
+    : lifetime until $timestamp
+      restricts lifetime of ticket to be only valid
+      until $timestamp is reached (exclusive).
+
+    : lifetime for $duration
+      restricts lifetime of ticket to be only valid
+      for at most $duration.
+
+    : lifetime conn
+      restricts lifetime of ticket to be only valid
+      for the time the current connection to the T3P
+      is held open.
+      This is convenient, as it automatically invalidates
+      tickets after the end of the session, but has the
+      downside that the tickets are invalidated if the
+      connections breaks as a consequence of network errors, too.
+
+  LIFETIME-RENEW*:
+    * ONLY-INTERSECTION
+
+    : lifetime renew until $timestamp
+    : lifetime renew for $duration
+      (equivalent to the LIFETIME* opts, but for the allowed renew time)
+
+  DELEGATE*: (allow) delegate pubkey $pubkey
+    if specified, the ticket is only valid if the client
+    uses one of the specified pubkeys to connect to the
+    service.
+    if specified, the service can contact the T3P and
+    issue derived tickets if the flag ALLOW-DERIVE is set.
+    the lifetime of these tickets is tied to the lifetime of the parent ticket
+    (except if the flag ALLOW-EXPAND is set in the current ticket).
+
+    Suboptions:
+      - PIN-NET*: pin net $af $addr $prefixlen
+        only allow access from the pubkey if the server with that pubkey
+        has a matching network address (e.g. IP address, etc.) 
+        (multiple stmts are joined via OR)
+
+  ROLES*: roles $role+
+    if specified at all, the ticket is only valid to be used at most
+    with roles equal to the specified roles
+
+    * ONLY-INTERSECTION
+
