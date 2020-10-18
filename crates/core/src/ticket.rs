@@ -24,7 +24,9 @@ pub enum PubkeyAllowedPin {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PubkeyAssocData {
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pins: BTreeSet<PubkeyAllowedPin>,
+
     flags: PubkeyFlags,
 }
 
@@ -96,6 +98,9 @@ pub struct Ticket {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tid: Option<u64>,
 
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     roles: BTreeSet<String>,
+
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pubkeys: PubkeyMap,
 }

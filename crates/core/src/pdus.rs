@@ -40,10 +40,12 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tid: Option<u64>,
 
+        #[serde(default, skip_serializing_if = "ticket::Roles::is_empty")]
         roles: ticket::Roles,
 
         /// the T3P MAY disallow issuing tickets without specified
         /// associated pubkeys
+        #[serde(default, skip_serializing_if = "ticket::PubkeyMap::is_empty")]
         pubkeys: ticket::PubkeyMap,
     },
 
