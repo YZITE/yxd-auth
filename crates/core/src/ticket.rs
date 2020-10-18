@@ -64,18 +64,23 @@ pub struct Pubkey {
     value: Vec<u8>,
 }
 
+// we use b-tree sets and maps as these are probably faster
+// to (de-/)serialize
+pub type Roles = BTreeSet<String>;
 pub type PubkeyMap = BTreeMap<Pubkey, PubkeyAssocData>;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Ticket {
     creation_time: UtcDateTime,
 
+    // validity check
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ts_last_valid_chk: Option<UtcDateTime>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ivd_valid_chk: Option<Duration>,
 
+    // lifetime
     ts_lt_after: UtcDateTime,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -84,14 +89,13 @@ pub struct Ticket {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ts_lt_renew_until: Option<UtcDateTime>,
 
+    // ID
     ident: String,
     realm: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    id: Option<u64>,
+    tid: Option<u64>,
 
-    // we use b-tree sets and maps as these are probably faster
-    // to (de-/)serialize
     roles: BTreeSet<String>,
     pubkeys: PubkeyMap,
 }
