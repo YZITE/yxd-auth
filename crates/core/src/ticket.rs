@@ -64,6 +64,8 @@ pub struct Pubkey {
     value: Vec<u8>,
 }
 
+pub type PubkeyMap = BTreeMap<Pubkey, PubkeyAssocData>;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Ticket {
     creation_time: UtcDateTime,
@@ -91,5 +93,5 @@ pub struct Ticket {
     // we use b-tree sets and maps as these are probably faster
     // to (de-/)serialize
     roles: BTreeSet<String>,
-    pubkeys: BTreeMap<Pubkey, PubkeyAssocData>,
+    pubkeys: PubkeyMap,
 }
