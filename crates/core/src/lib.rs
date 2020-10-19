@@ -1,9 +1,9 @@
 pub use yz_encsess;
-
-pub mod ticket;
+pub use yz_glue_dhchoice::DHChoice;
 pub type UtcDateTime = chrono::DateTime<chrono::Utc>;
 
+pub mod ticket;
 mod signedobj;
-pub use signedobj::SignedObject;
-
 pub mod pdus;
+
+pub use signedobj::SignedObject;

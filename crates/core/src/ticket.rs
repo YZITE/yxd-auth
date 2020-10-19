@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
-use zeroize::Zeroize;
+use yz_glue_dhchoice::DHChoice;
 
 bitflags! {
     #[derive(Deserialize, Serialize)]
@@ -30,37 +30,8 @@ pub struct PubkeyAssocData {
     flags: PubkeyFlags,
 }
 
-#[derive(
-    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Zeroize,
-)]
-pub enum DHChoice {
-    Ed25519,
-    Ed448,
-}
-
-impl From<snow::params::DHChoice> for DHChoice {
-    fn from(x: snow::params::DHChoice) -> DHChoice {
-        use snow::params::DHChoice as SnDhc;
-        match x {
-            SnDhc::Curve25519 => DHChoice::Ed25519,
-            SnDhc::Ed448 => DHChoice::Ed448,
-        }
-    }
-}
-
-impl From<DHChoice> for snow::params::DHChoice {
-    fn from(x: DHChoice) -> Self {
-        use snow::params::DHChoice as SnDhc;
-        match x {
-            DHChoice::Ed25519 => SnDhc::Curve25519,
-            DHChoice::Ed448 => SnDhc::Ed448,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, Zeroize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(tag = "type")]
-#[zeroize(drop)]
 pub struct Pubkey {
     dh: DHChoice,
     value: Vec<u8>,

@@ -8,7 +8,6 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 bitflags = "1.2"
-secrecy = "0.7"
 serde_cbor = "0.11"
 zeroize = "1.1"
 
@@ -21,10 +20,11 @@ features = ["alloc", "clock", "serde", "std"]
 version = "1.0"
 features = ["derive"]
 
-[dependencies.snow]
-version = "0.7"
-default-features = false
-
 [dependencies.yz-encsess]
 git = "https://github.com/YZITE/encsess2.git"
 branch = "master"
+
+[dependencies.yz-glue-dhchoice]
+git = "https://github.com/YZITE/encsess2.git"
+branch = "master"
+features = ["serde"]
