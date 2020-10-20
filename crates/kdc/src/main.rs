@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Serialize)]
 struct ServerConfig {
     listen: String,
-    
 }
 
 fn main() {
@@ -17,8 +16,6 @@ fn main() {
 
     let cfgf = std::fs::read(&args[1]).expect("unable to read config file");
     let cfgf: ServerConfig = toml::from_slice(&cfgf[..]).expect("unable to parse config file");
-
-
 
     println!("Hello, world!");
 }

@@ -1,10 +1,10 @@
-use crate::{UtcDateTime, SignedObject};
+use crate::{SignedObject, UtcDateTime};
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
-use yz_glue_dhchoice::DHChoice;
+pub use yz_glue_dhchoice::DHChoice;
 
 bitflags! {
     #[derive(Deserialize, Serialize)]

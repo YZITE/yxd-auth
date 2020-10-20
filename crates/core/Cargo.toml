@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 bitflags = "1.2"
+futures = "0.3"
 serde_cbor = "0.11"
 zeroize = "1.1"
 
@@ -15,6 +16,10 @@ zeroize = "1.1"
 version = "0.4"
 default-features = false
 features = ["alloc", "clock", "serde", "std"]
+
+[dependencies.futures_codec]
+version = "0.4"
+features = ["cbor"]
 
 [dependencies.serde]
 version = "1.0"
