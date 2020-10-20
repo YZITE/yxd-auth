@@ -15,6 +15,7 @@ pub use base64key::Base64Key;
 
 // utilities
 pub use async_executor::Executor;
+pub use base64;
 
 /// Multithreaded `block_on` function
 pub fn block_on<F, I, R>(f: F) -> R

@@ -1,16 +1,40 @@
 #![forbid(unsafe_code)]
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use zeroize::Zeroize;
 
-#[derive(Clone, Deserialize, Serialize, Zeroize)]
-struct ServerConfig {
-    listen: String,
-    privkey: yxd_auth_core::Base64Key,
+async fn setup_session(
+    scfg: Arc<yz_encsess::Config>,
+    stream: async_net::TcpStream,
+    peer_addr: std::net::SocketAddr,
+) -> Result<
+    yxd_auth_core::PacketStream<
+        yz_encsess::Session,
+        yxd_auth_core::pdus::Response,
+        yxd_auth_core::pdus::Request,
+    >,
+> {
+    let yzes = yz_encsess::Session::new(stream, scfg)
+        .await
+        .with_context(|| format!("KDC::setup_session with peer = {}", peer_addr))?;
+    let pkts = yxd_auth_core::PacketStream::new(yzes);
+    tracing::info!(
+        "Established connection with {} and pubkey = {} ",
+        peer_addr,
+        yxd_auth_core::base64::encode(pkts.remote_static_pubkey().unwrap())
+    );
+    Ok(pkts)
 }
 
 fn main() {
+    #[derive(Clone, Deserialize, Serialize, Zeroize)]
+    struct ServerConfig {
+        listen: String,
+        privkey: yxd_auth_core::Base64Key,
+    };
+
     tracing_subscriber::fmt::init();
 
     let args: Vec<_> = std::env::args().collect();

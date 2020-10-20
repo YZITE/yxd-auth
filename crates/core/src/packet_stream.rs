@@ -40,3 +40,25 @@ where
         self.0.try_next()
     }
 }
+
+impl<S, Req, Resp> std::ops::Deref for PacketStream<S, Req, Resp>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    type Target = S;
+
+    #[inline(always)]
+    fn deref(&self) -> &S {
+        &*self.0
+    }
+}
+
+impl<S, Req, Resp> std::ops::DerefMut for PacketStream<S, Req, Resp>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut S {
+        &mut *self.0
+    }
+}
