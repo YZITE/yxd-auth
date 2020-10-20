@@ -1,9 +1,16 @@
 use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 use zeroize::Zeroize;
 
-#[derive(Zeroize)]
+#[derive(Clone, Zeroize)]
 #[zeroize(drop)]
 pub struct Base64Key(pub Vec<u8>);
+
+impl Base64Key {
+    #[inline(always)]
+    pub fn into_inner(mut self) -> Vec<u8> {
+        std::mem::take(&mut self.0)
+    }
+}
 
 impl Serialize for Base64Key {
     #[inline]

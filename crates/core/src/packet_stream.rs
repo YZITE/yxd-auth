@@ -1,7 +1,7 @@
-use futures::io::{AsyncRead, AsyncWrite};
-use futures::sink::SinkExt;
-use futures::stream::{StreamExt, TryStreamExt};
 use futures_codec::{CborCodec, Framed};
+use futures_util::io::{AsyncRead, AsyncWrite};
+use futures_util::sink::SinkExt;
+use futures_util::stream::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use std::{future::Future, marker::Unpin};
 
