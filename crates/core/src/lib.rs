@@ -9,3 +9,6 @@ pub mod pdus;
 
 mod packet_stream;
 pub use packet_stream::{Error as PacketStreamError, PacketStream};
+
+mod base64key;
+pub use base64key::Base64Key;

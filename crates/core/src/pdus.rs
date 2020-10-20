@@ -34,12 +34,12 @@ pub struct PubkeyAssocData {
 #[serde(tag = "type")]
 pub struct Pubkey {
     dh: DHChoice,
-    value: Vec<u8>,
+    value: serde_bytes::ByteBuf,
 }
 
 // we use b-tree sets and maps as these are probably faster
 // to (de-/)serialize
-pub type Roles = BTreeSet<String>;
+pub type Roles = BTreeSet<serde_bytes::ByteBuf>;
 pub type PubkeyMap = BTreeMap<Pubkey, PubkeyAssocData>;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -70,15 +70,14 @@ pub struct Ticket {
     tid: Option<u64>,
 
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    roles: BTreeSet<Vec<u8>>,
+    roles: Roles,
 
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pubkeys: PubkeyMap,
 
     /// This field allows to attach arbitrary data to the ticket,
     /// which is in turn signed by the T3P
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    payload: Vec<u8>,
+    payload: serde_bytes::ByteBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -118,13 +117,15 @@ pub struct AcquireTicketCommand {
 
     /// This field allows to attach arbitrary data to the ticket,
     /// which is in turn signed by the T3P
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    payload: Vec<u8>,
+    payload: serde_bytes::ByteBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum AuthCommand {
-    Password { username: String, password: String },
+    Password {
+        username: String,
+        password: serde_bytes::ByteBuf,
+    },
 
     Ticket(SignedObject<Ticket>),
 }
