@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use zeroize::Zeroize;
 
-#[derive(Clone, Deserialize, Serialize, Zeroize)]
+#[derive(Clone, Debug, Deserialize, Serialize, Zeroize)]
 pub struct SignedObject<T> {
     obj: Vec<u8>,
     signature: Vec<u8>,
