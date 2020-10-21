@@ -2,8 +2,10 @@
 
 pub type UtcDateTime = chrono::DateTime<chrono::Utc>;
 
+pub mod error;
+
 mod signedobj;
-pub use signedobj::SignedObject;
+pub use signedobj::{SignedObject, Signable, Error as SignObjError};
 
 pub mod pdus;
 
@@ -16,6 +18,7 @@ pub use base64key::Base64Key;
 // utilities
 pub use async_executor::Executor;
 pub use base64;
+pub use ring;
 
 /// Multithreaded `block_on` function
 pub fn block_on<F, I, R>(f: F) -> R
