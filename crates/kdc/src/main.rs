@@ -7,6 +7,8 @@ use std::sync::Arc;
 use yxd_auth_core::ring::signature::{self, KeyPair};
 use zeroize::Zeroize;
 
+const DHC: yxd_auth_core::pdus::DHChoice = yxd_auth_core::pdus::DHChoice::Ed25519;
+
 struct ServerStateInner {
     realm: String,
     keypair_sign: signature::Ed25519KeyPair,
@@ -23,10 +25,18 @@ impl ServerStateInner {
 
 type ServerState = Arc<ServerStateInner>;
 
+struct ClAuthState {
+    ident: String,
+    allow_expand: bool,
+    parent_ticket: Option<yxd_auth_core::pdus::Ticket>,
+}
+
 struct ClientData {
     srvstate: ServerState,
-    auth_state: Option<String>,
-    parent_ticket: Option<yxd_auth_core::pdus::Ticket>,
+    peer_addr: std::net::SocketAddr,
+    peer_ip_addr: std::net::IpAddr,
+    pubkey: yxd_auth_core::pdus::PubKey,
+    auth_state: Option<ClAuthState>,
 }
 
 impl ClientData {
@@ -37,35 +47,51 @@ impl ClientData {
         match cmd {
             Command::Auth(_) if sudo.is_some() => Response::InvalidInvocation,
             Command::Auth(a) => {
-                self.auth_state = match a {
+                self.auth_state = Some(match a {
                     AuthCommand::Password { username, .. } => {
                         // FIXME: check if the user password matches
-                        Some(username)
+                        ClAuthState {
+                            ident: username,
+                            allow_expand: true,
+                            parent_ticket: None,
+                        }
                     }
                     AuthCommand::Ticket(sigt) => {
-                        // FIXME: verify the ticket signature
                         match sigt.decode_and_verify(&self.srvstate.signing_public_key()) {
                             Ok(ticket) => {
                                 if &ticket.realm != &self.srvstate.realm {
                                     return Response::PermissionDenied;
                                 }
-                                let asst = Some(ticket.ident.clone());
-                                self.parent_ticket = Some(ticket);
-                                asst
+                                let allow_expand = if let Some(pke) = ticket.pubkeys.get(&self.pubkey) {
+                                    if !pke.is_allowed(&self.peer_ip_addr) {
+                                        return Response::PermissionDenied;
+                                    }
+                                    pke.flags & PubkeyFlags::A_EXPAND
+                                };
+                                Some(ClAuthState {
+                                    ident: ticket.ident.clone(),
+                                    allow_expand,
+                                    parent_ticket: Some(ticket),
+                                })
                             }
                             Err(x) => {
                                 return Response::PermissionDenied;
                             }
                         }
                     }
-                };
+                });
                 Response::Success
             }
 
             // FIXME: admins should have SUDO rights
             _ if sudo.is_some() => Response::PermissionDenied,
             _ if self.auth_state.is_none() => Response::PermissionDenied,
-            _ => Response::InvalidInvocation,
+
+            Command::Acquire(acq) => {
+                // FIXME: handle sudo
+                
+            }
+            //_ => Response::InvalidInvocation,
         }
     }
 }
@@ -83,16 +109,21 @@ async fn handle_client(
         .await
         .with_context(|| format!("KDC::setup_session with peer = {}", peer_addr))?;
     let mut s = yxd_auth_core::PacketStream::<_, Response, Request>::new(yzes);
+    let pubkey = s.remote_static_pubkey().unwrap();
     tracing::info!(
         "Established connection with {} and pubkey = {}",
         peer_addr,
-        yxd_auth_core::base64::encode(s.remote_static_pubkey().unwrap())
+        yxd_auth_core::base64::encode(pubkey)
     );
+
+    let peer_ip_addr = peer_addr.ip();
 
     let mut clientdat = ClientData {
         srvstate,
+        peer_addr,
+        peer_ip_addr,
+        pubkey: PubKey { dhc: DHC.clone(), value: pubkey.to_vec() },
         auth_state: None,
-        parent_ticket: None,
     };
 
     // handle commands
@@ -126,7 +157,7 @@ fn main() {
     let yzesc = Arc::new(yz_encsess::Config {
         privkey: yz_encsess::new_key(cfgf.privkey_noise.into_inner()),
         side: yz_encsess::SideConfig::Server,
-        dhc: yxd_auth_core::pdus::DHChoice::Ed25519,
+        dhc: DHC.clone(),
     });
 
     yxd_auth_core::block_on(|_| async move {});

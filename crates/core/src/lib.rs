@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub type UtcDateTime = chrono::DateTime<chrono::Utc>;
+pub use chrono::Utc;
 
 pub mod error;
 
@@ -39,4 +40,19 @@ where
             ret
         })
         .1
+}
+
+pub fn prefix_match(a: &[u8], b: &[u8], prefixlen: u8) -> bool {
+    let (pfl_bs, pfl_subbs) = (prefixlen / 8, prefixlen % 8);
+    let rminlen = std::cmp::min(a.len(), b.len());
+    if (rminlen < pfl_bs) || (&a[..pfl_bs] != &b[..pfl_bs]) {
+        false
+    } else if pfl_subbs == 0 {
+        true
+    } else if rminlen < (pfl_bs + 1) {
+        false
+    } else {
+        let mask = 255u8.wrapping_shl(pfl_subbs);
+        (a[pfl_bs] & mask) == (b[pfl_bs] & mask)
+    }
 }

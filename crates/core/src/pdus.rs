@@ -30,11 +30,48 @@ pub struct PubkeyAssocData {
     flags: PubkeyFlags,
 }
 
+impl PubkeyAssocData {
+    pub fn is_allowed(&self, peer_addr: &std::net::IpAddr) -> bool {
+        use crate::prefix_match;
+        use std::net::IpAddr;
+
+        if self.pins.is_empty() {
+            return true;
+        }
+        match peer_addr.ip() {
+            IpAddr::V4(ip4) => {
+                let peer_octs = ip4.octets();
+                self.pins.iter().any(|i| {
+                    if let NetworkV4 { addr, prefixlen } = i {
+                        if prefix_match(&addr.octets(), &peer_octs, prefixlen) {
+                            return true;
+                        }
+                    }
+                    false
+                })
+            }
+            IpAddr::V6(ip6) => {
+                let peer_octs = ip6.octets();
+                self.pins.iter().any(|i| {
+                    if let NetworkV6 { addr, prefixlen } = i {
+                        if prefix_match(&addr.octets(), &peer_octs, prefixlen) {
+                            return true;
+                        }
+                    }
+                    false
+                })
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub struct Pubkey {
     dh: DHChoice,
-    value: serde_bytes::ByteBuf,
+
+    #[serde(with = "serde_bytes")]
+    value: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
@@ -84,7 +121,25 @@ pub struct Ticket {
 
     /// This field allows to attach arbitrary data to the ticket,
     /// which is in turn signed by the T3P
-    pub payload: serde_bytes::ByteBuf,
+    #[serde(with = "serde_bytes")]
+    pub payload: Vec<u8>,
+}
+
+impl Ticket {
+    pub fn is_valid(&self, now: &UtcDateTime) -> bool {
+        if self.ts_lt_after.as_ref().map(|x| x < now) == Some(true) {
+            return false;
+        }
+        if self.ts_lt_until.as_ref().map(|x| x > now) == Some(true) {
+            return false;
+        }
+        true
+    }
+
+    // PREREQ .is_valid()
+    pub fn is_renewable(&self, now: &UtcDateTime) -> bool {
+        self.ts_lt_renew_until.as_ref().map(|x| x > now) == Some(false)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -124,7 +179,64 @@ pub struct AcquireTicketCommand {
 
     /// This field allows to attach arbitrary data to the ticket,
     /// which is in turn signed by the T3P
-    pub payload: serde_bytes::ByteBuf,
+    #[serde(with = "serde_bytes")]
+    pub payload: Vec<u8>,
+}
+
+fn combine_olt<F>(a: Option<UtcDateTime>, b: Option<UtcDateTime>, f: F) -> Option<UtcDateTime>
+where
+    F: FnOnce(UtcDateTime, UtcDateTime) -> UtcDateTime,
+{
+    match (a, b) {
+        (None, None) => None,
+        (Some(a), Some(b) => Some(f(a, b)),
+        (a, b) => a.or(b).map(Clone::clone),
+    }
+}
+
+fn combine_lt_until(now: &UtcDateTime, until: Option<UtcDateTime>, for_: Option<Duration>) -> Option<UtcDateTime> {
+    combine_olt(until, for_.and_then(|x| chrono::Duration::from_std(x).ok()).map(|x| now.clone() + x), std::cmp::min)
+}
+
+impl AcquireTicketCommand {
+    pub fn try_finish(self, now: &UtcDateTime, realm: &str, parent_ticket: Option<&Ticket>, ident: &str, allow_expand: bool) -> Result<Ticket, Response> {
+        macro_rules! combine_olt {
+            ($self:ident, $tslt:ident, $cmp:expr) => {{
+                combine_olt(parent_ticket.and_then(|t| t.$tslt.clone()), $self.$tslt.clone(), $cmp)
+            }}
+        };
+
+        use std::cmp::{min, max};
+        let ts_last_valid_chk = match &self.ts_lt_after {
+            Some(x) if x > now => Some(now.clone()),
+            _ => None,
+        }
+        let ts_lt_until = combine_lt_until(now, combine_olt!(self, ts_lt_until, min), self.ts_lt_for.clone());
+        let ts_lt_renew_until = combine_lt_until(now, combine_olt(ts_lt_until.clone(), self.ts_lt_renew_until.clone()), self.ts_lt_renew_for.clone());
+        let mut ret = Ticket {
+            signature_algo: SignatureAlgo::Ed25519,
+            creation_time: chrono::offset::Utc::now(),
+
+            ts_last_valid_chk,
+            ivd_validity_chk: self.ivd_validiy_chk,
+
+            ts_lt_after: combine_olt!(self, ts_lt_after, max),
+            ts_lt_until,
+            ts_lt_renew_until,
+
+            ident: ident.to_string(),
+            realm: realm.to_string(),
+            tid: self.tid,
+
+            roles: match &parent_ticket {
+                Some(t) => t.roles.intersection(&self.roles),
+                None => self.roles.clone(),
+            },
+
+            pubkeys: self.pubkeys,
+            payload: self.payload,
+        };
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
