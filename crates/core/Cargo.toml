@@ -39,6 +39,10 @@ features = ["cbor"]
 version = "1.0"
 features = ["derive"]
 
+[dependencies.serde_derive]
+version = "1.0"
+features = ["deserialize_in_place"]
+
 [dependencies.yz-glue-dhchoice]
 git = "https://github.com/YZITE/encsess2.git"
 branch = "master"

@@ -35,7 +35,7 @@ struct ClientData {
     srvstate: ServerState,
     peer_addr: std::net::SocketAddr,
     peer_ip_addr: std::net::IpAddr,
-    pubkey: yxd_auth_core::pdus::PubKey,
+    pubkey: yxd_auth_core::pdus::Pubkey,
     auth_state: Option<ClAuthState>,
 }
 
@@ -62,17 +62,20 @@ impl ClientData {
                                 if &ticket.realm != &self.srvstate.realm {
                                     return Response::PermissionDenied;
                                 }
-                                let allow_expand = if let Some(pke) = ticket.pubkeys.get(&self.pubkey) {
-                                    if !pke.is_allowed(&self.peer_ip_addr) {
-                                        return Response::PermissionDenied;
-                                    }
-                                    pke.flags & PubkeyFlags::A_EXPAND
-                                };
-                                Some(ClAuthState {
+                                let allow_expand =
+                                    if let Some(pke) = ticket.pubkeys.get(&self.pubkey) {
+                                        if !pke.is_allowed(&self.peer_ip_addr) {
+                                            return Response::PermissionDenied;
+                                        }
+                                        pke.flags.contains(PubkeyFlags::A_EXPAND)
+                                    } else {
+                                        false
+                                    };
+                                ClAuthState {
                                     ident: ticket.ident.clone(),
                                     allow_expand,
                                     parent_ticket: Some(ticket),
-                                })
+                                }
                             }
                             Err(x) => {
                                 return Response::PermissionDenied;
@@ -89,9 +92,19 @@ impl ClientData {
 
             Command::Acquire(acq) => {
                 // FIXME: handle sudo
-                
-            }
-            //_ => Response::InvalidInvocation,
+                let now = yxd_auth_core::Utc::now();
+                let auth_state = self.auth_state.as_ref().unwrap();
+                match acq.try_finish(&now, &self.srvstate.realm, if auth_state.allow_expand { None } else { auth_state.parent_ticket.as_ref() }, &auth_state.ident) {
+                    Ok(x) => match yxd_auth_core::SignedObject::encode(&x, &self.srvstate.keypair_sign) {
+                        Ok(x) => Response::Ticket(x),
+                        Err(e) => {
+                            tracing::error!("unable to create ticket: {}", e);
+                            Response::Failure
+                        }
+                    },
+                    Err(resp) => resp,
+                }
+            } //_ => Response::InvalidInvocation,
         }
     }
 }
@@ -122,7 +135,10 @@ async fn handle_client(
         srvstate,
         peer_addr,
         peer_ip_addr,
-        pubkey: PubKey { dhc: DHC.clone(), value: pubkey.to_vec() },
+        pubkey: Pubkey {
+            dh: DHC.clone(),
+            value: pubkey.to_vec(),
+        },
         auth_state: None,
     };
 

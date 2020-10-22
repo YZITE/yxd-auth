@@ -43,7 +43,7 @@ where
 }
 
 pub fn prefix_match(a: &[u8], b: &[u8], prefixlen: u8) -> bool {
-    let (pfl_bs, pfl_subbs) = (prefixlen / 8, prefixlen % 8);
+    let (pfl_bs, pfl_subbs) = (usize::from(prefixlen / 8), prefixlen % 8);
     let rminlen = std::cmp::min(a.len(), b.len());
     if (rminlen < pfl_bs) || (&a[..pfl_bs] != &b[..pfl_bs]) {
         false
@@ -52,7 +52,7 @@ pub fn prefix_match(a: &[u8], b: &[u8], prefixlen: u8) -> bool {
     } else if rminlen < (pfl_bs + 1) {
         false
     } else {
-        let mask = 255u8.wrapping_shl(pfl_subbs);
+        let mask = 255u8.wrapping_shl(pfl_subbs.into());
         (a[pfl_bs] & mask) == (b[pfl_bs] & mask)
     }
 }
