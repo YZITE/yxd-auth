@@ -19,6 +19,7 @@ pub use base64key::Base64Key;
 // utilities
 pub use async_executor::Executor;
 pub use base64;
+pub use chrono;
 pub use ring;
 
 /// Multithreaded `block_on` function

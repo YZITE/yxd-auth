@@ -4,10 +4,11 @@ use anyhow::{anyhow, Context, Result};
 use async_lock::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use yxd_auth_core::pdus;
 use yxd_auth_core::ring::signature::{self, KeyPair};
 use zeroize::Zeroize;
 
-const DHC: yxd_auth_core::pdus::DHChoice = yxd_auth_core::pdus::DHChoice::Ed25519;
+const DHC: pdus::DHChoice = pdus::DHChoice::Ed25519;
 
 struct ServerStateInner {
     realm: String,
@@ -28,25 +29,78 @@ type ServerState = Arc<ServerStateInner>;
 struct ClAuthState {
     ident: String,
     allow_expand: bool,
-    parent_ticket: Option<yxd_auth_core::pdus::Ticket>,
+    parent_ticket: Option<pdus::Ticket>,
 }
 
 struct ClientData {
     srvstate: ServerState,
     peer_addr: std::net::SocketAddr,
-    peer_ip_addr: std::net::IpAddr,
-    pubkey: yxd_auth_core::pdus::Pubkey,
+    pubkey: pdus::Pubkey,
     auth_state: Option<ClAuthState>,
 }
 
 impl ClientData {
-    fn handle_req(&mut self, req: yxd_auth_core::pdus::Request) -> yxd_auth_core::pdus::Response {
-        use yxd_auth_core::pdus::*;
-        let Request { cmd, sudo } = req;
+    fn check_ticket<Fid>(
+        &self,
+        now: &yxd_auth_core::UtcDateTime,
+        sigt: yxd_auth_core::SignedObject<pdus::Ticket>,
+        identchk: Fid,
+    ) -> ::std::result::Result<(pdus::Ticket, bool), ()>
+    where
+        Fid: FnOnce(&str) -> bool,
+    {
+        match sigt.decode_and_verify(&self.srvstate.signing_public_key()) {
+            Ok(mut ticket) => {
+                if &ticket.realm != &self.srvstate.realm || !identchk(&ticket.ident) {
+                    tracing::warn!(
+                        "client passed ticket with invalid realm ('{}') or ident ('{:?}')",
+                        &ticket.realm,
+                        &ticket.ident
+                    );
+                    return Err(());
+                }
+                if !ticket.is_valid(now) {
+                    tracing::warn!("client tried to use invalid or expired ticket");
+                    return Err(());
+                }
+                let allow_expand = if let Some(pke) = ticket.pubkeys.get(&self.pubkey) {
+                    if !pke.is_allowed(&self.peer_addr.ip()) {
+                        tracing::warn!(
+                            "client tried to use ticket from non-allowed IP {}",
+                            &self.peer_addr
+                        );
+                        return Err(());
+                    }
+                    pke.flags.contains(pdus::PubkeyFlags::A_EXPAND)
+                } else {
+                    false
+                };
+                ticket.ts_last_valid_chk = Some(now.clone());
+                Ok((ticket, allow_expand))
+            }
+            Err(x) => {
+                tracing::warn!("unable to decode+verify ticket: {}", x);
+                Err(())
+            }
+        }
+    }
 
-        match cmd {
-            Command::Auth(_) if sudo.is_some() => Response::InvalidInvocation,
-            Command::Auth(a) => {
+    fn sign_ticket(&self, ticket: pdus::Ticket) -> pdus::Response {
+        match yxd_auth_core::SignedObject::encode(&ticket, &self.srvstate.keypair_sign) {
+            Ok(x) => pdus::Response::Ticket(x),
+            Err(e) => {
+                tracing::error!("unable to sign ticket: {}", e);
+                pdus::Response::Failure
+            }
+        }
+    }
+
+    fn handle_req(&mut self, req: pdus::Request) -> pdus::Response {
+        use pdus::*;
+        let now = yxd_auth_core::Utc::now();
+
+        match req {
+            Request::Auth(a) => {
                 self.auth_state = Some(match a {
                     AuthCommand::Password { username, .. } => {
                         // FIXME: check if the user password matches
@@ -57,52 +111,84 @@ impl ClientData {
                         }
                     }
                     AuthCommand::Ticket(sigt) => {
-                        match sigt.decode_and_verify(&self.srvstate.signing_public_key()) {
-                            Ok(ticket) => {
-                                if &ticket.realm != &self.srvstate.realm {
-                                    return Response::PermissionDenied;
-                                }
-                                let allow_expand =
-                                    if let Some(pke) = ticket.pubkeys.get(&self.pubkey) {
-                                        if !pke.is_allowed(&self.peer_ip_addr) {
-                                            return Response::PermissionDenied;
-                                        }
-                                        pke.flags.contains(PubkeyFlags::A_EXPAND)
-                                    } else {
-                                        false
-                                    };
-                                ClAuthState {
-                                    ident: ticket.ident.clone(),
-                                    allow_expand,
-                                    parent_ticket: Some(ticket),
-                                }
-                            }
-                            Err(x) => {
-                                return Response::PermissionDenied;
-                            }
+                        let now = yxd_auth_core::Utc::now();
+                        match self.check_ticket(&now, sigt, |_| true) {
+                            Ok((ticket, allow_expand)) => ClAuthState {
+                                ident: ticket.ident.clone(),
+                                allow_expand,
+                                parent_ticket: Some(ticket),
+                            },
+                            Err(()) => return Response::PermissionDenied,
                         }
                     }
                 });
                 Response::Success
             }
 
-            // FIXME: admins should have SUDO rights
-            _ if sudo.is_some() => Response::PermissionDenied,
             _ if self.auth_state.is_none() => Response::PermissionDenied,
 
-            Command::Acquire(acq) => {
-                // FIXME: handle sudo
-                let now = yxd_auth_core::Utc::now();
+            Request::Acquire(acq) => {
+                // FIXME: admins should have SUDO rights; handle sudo
                 let auth_state = self.auth_state.as_ref().unwrap();
-                match acq.try_finish(&now, &self.srvstate.realm, if auth_state.allow_expand { None } else { auth_state.parent_ticket.as_ref() }, &auth_state.ident) {
-                    Ok(x) => match yxd_auth_core::SignedObject::encode(&x, &self.srvstate.keypair_sign) {
-                        Ok(x) => Response::Ticket(x),
-                        Err(e) => {
-                            tracing::error!("unable to create ticket: {}", e);
+                match acq.try_finish(
+                    &now,
+                    &self.srvstate.realm,
+                    if auth_state.allow_expand {
+                        None
+                    } else {
+                        auth_state.parent_ticket.as_ref()
+                    },
+                    &auth_state.ident,
+                ) {
+                    Ok(x) => self.sign_ticket(x),
+                    Err(resp) => resp,
+                }
+            }
+
+            Request::Revoke { .. } => {
+                // FIXME: implement revocation (requires database access)
+                // FIXME: admins should have SUDO rights; handle sudo
+                Response::Unimplemented
+            }
+
+            Request::Renew(sigt) => {
+                let auth_state = self.auth_state.as_ref().unwrap();
+                // FIXME: admins should have SUDO rights; handle sudo (sudo suppresses the ident check)
+                match self.check_ticket(&now, sigt, |id| id == &auth_state.ident) {
+                    Ok((mut ticket, _)) => {
+                        if ticket.is_renewable(&now) {
+                            let incr = if let Some(ivd) = ticket.ivd_valid_chk {
+                                match yxd_auth_core::chrono::Duration::from_std(ivd) {
+                                    Ok(x) => x,
+                                    Err(e) => {
+                                        tracing::warn!("client tried to renew ticket with invalid ivd_valid_chk duration: {}", e);
+                                        return Response::InvalidInvocation;
+                                    }
+                                }
+                            // FIXME: we should use the mean value of ivd and the default value
+                            } else {
+                                // FIXME: use a default value
+                                return Response::Unimplemented;
+                            };
+                            let ts_lt_renew_until = ticket
+                                .ts_lt_renew_until
+                                .clone()
+                                .unwrap()
+                                .checked_add_signed(incr);
+                            let ts_lt_until =
+                                ticket.ts_lt_until.clone().unwrap().checked_add_signed(incr);
+                            if ts_lt_renew_until.is_none() || ts_lt_until.is_none() {
+                                Response::Failure
+                            } else {
+                                ticket.ts_lt_renew_until = ts_lt_renew_until;
+                                ticket.ts_lt_until = ts_lt_until;
+                                self.sign_ticket(ticket)
+                            }
+                        } else {
                             Response::Failure
                         }
-                    },
-                    Err(resp) => resp,
+                    }
+                    Err(()) => Response::PermissionDenied,
                 }
             } //_ => Response::InvalidInvocation,
         }
@@ -115,7 +201,7 @@ async fn handle_client(
     stream: async_net::TcpStream,
     peer_addr: std::net::SocketAddr,
 ) -> Result<()> {
-    use yxd_auth_core::pdus::*;
+    use pdus::*;
 
     // setup session
     let yzes = yz_encsess::Session::new(stream, yzescfg)
@@ -129,12 +215,9 @@ async fn handle_client(
         yxd_auth_core::base64::encode(pubkey)
     );
 
-    let peer_ip_addr = peer_addr.ip();
-
     let mut clientdat = ClientData {
         srvstate,
         peer_addr,
-        peer_ip_addr,
         pubkey: Pubkey {
             dh: DHC.clone(),
             value: pubkey.to_vec(),
@@ -143,8 +226,17 @@ async fn handle_client(
     };
 
     // handle commands
-    while let Some(req) = s.try_recv().await? {
-        s.send(clientdat.handle_req(req)).await?;
+    {
+        let span = tracing::span!(
+            tracing::Level::INFO,
+            "handle_client",
+            "{}",
+            &clientdat.peer_addr
+        );
+        let _enter = span.enter();
+        while let Some(req) = s.try_recv().await? {
+            s.send(clientdat.handle_req(req)).await?;
+        }
     }
 
     Ok(())

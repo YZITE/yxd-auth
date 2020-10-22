@@ -69,10 +69,10 @@ impl PubkeyAssocData {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub struct Pubkey {
-    dh: DHChoice,
+    pub dh: DHChoice,
 
     #[serde(with = "serde_bytes")]
-    value: Vec<u8>,
+    pub value: Vec<u8>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
@@ -128,12 +128,13 @@ pub struct Ticket {
 
 impl Ticket {
     pub fn is_valid(&self, now: &UtcDateTime) -> bool {
-        &self.ts_lt_after >= now && self.ts_lt_until.as_ref().map(|x| x > now) != Some(true)
+        &self.ts_lt_after >= now && self.ts_lt_until.as_ref().map(|x| x >= now) != Some(true)
     }
 
     // PREREQ .is_valid()
     pub fn is_renewable(&self, now: &UtcDateTime) -> bool {
-        self.ts_lt_renew_until.as_ref().map(|x| x > now) == Some(false)
+        self.ts_lt_renew_until.as_ref().map(|x| x >= now) == Some(false)
+            && self.ts_lt_until.is_some()
     }
 }
 
@@ -160,7 +161,12 @@ pub struct AcquireTicketCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ts_lt_renew_for: Option<Duration>,
 
-    // ident & name are taken from the authentification data
+    /// if set, basically try to execute the command as another user.
+    /// `ident` is either taken from this value (if set),
+    /// or from the authentification data
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ident: Option<String>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tid: Option<u64>,
 
@@ -216,10 +222,11 @@ impl AcquireTicketCommand {
             _ => None,
         };
         let ts_lt_after = combine_olt(
-                parent_ticket.map(|t| t.ts_lt_after.clone()),
-                self.ts_lt_after.clone(),
-                max,
-            ).unwrap_or_else(|| now.clone());
+            parent_ticket.map(|t| t.ts_lt_after.clone()),
+            self.ts_lt_after.clone(),
+            max,
+        )
+        .unwrap_or_else(|| now.clone());
         let ts_lt_until = combine_lt_until(
             now,
             combine_olt(
@@ -281,7 +288,7 @@ pub enum AuthCommand {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum Command {
+pub enum Request {
     Auth(AuthCommand),
 
     Acquire(AcquireTicketCommand),
@@ -301,18 +308,10 @@ pub enum Command {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Request {
-    pub cmd: Command,
-
-    /// if set, try to execute the command as another user
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sudo: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Response {
     Success,
     Failure,
+    Unimplemented,
     InvalidInvocation,
     InvalidLifetime,
     PermissionDenied,
