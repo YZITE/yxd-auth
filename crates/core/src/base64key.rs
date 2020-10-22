@@ -12,6 +12,13 @@ impl Base64Key {
     }
 }
 
+impl std::ops::Deref for Base64Key {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl Serialize for Base64Key {
     #[inline]
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {

@@ -476,8 +476,7 @@ dependencies = [
 [[package]]
 name = "futures_codec"
 version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce54d63f8b0c75023ed920d46fd71d0cbbb830b0ee012726b5b4f506fb6dea5b"
+source = "git+https://github.com/zserik/futures-codec.git?branch=impl-stderror#279a8d9b57957eb1557a8d17d46295fd44f24e4c"
 dependencies = [
  "bytes",
  "futures",

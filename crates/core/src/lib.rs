@@ -5,7 +5,7 @@ pub type UtcDateTime = chrono::DateTime<chrono::Utc>;
 pub mod error;
 
 mod signedobj;
-pub use signedobj::{SignedObject, Signable, Error as SignObjError};
+pub use signedobj::{Error as SignObjError, Signable, SignedObject};
 
 pub mod pdus;
 

@@ -31,13 +31,19 @@ pub trait Signable: Serialize {
     type PrivateContext;
     type Error: std::fmt::Debug + std::error::Error;
 
-    fn sign(obj: &[u8], decoded: &Self, ctx: &Self::PrivateContext) -> Result<Vec<u8>, Self::Error>;
+    fn sign(obj: &[u8], decoded: &Self, ctx: &Self::PrivateContext)
+        -> Result<Vec<u8>, Self::Error>;
 }
 
 pub trait Verifyable<'pk>: for<'de> Deserialize<'de> + Signable {
     type PublicContext: 'pk;
 
-    fn verify(obj: &[u8], decoded: &Self, signature: &[u8], ctx: &Self::PublicContext) -> Result<(), <Self as Signable>::Error>;
+    fn verify(
+        obj: &[u8],
+        decoded: &Self,
+        signature: &[u8],
+        ctx: &Self::PublicContext,
+    ) -> Result<(), <Self as Signable>::Error>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -78,7 +84,11 @@ impl Signable for crate::pdus::Ticket {
     type PrivateContext = ring::signature::Ed25519KeyPair;
     type Error = UnspecSignErr;
 
-    fn sign(obj: &[u8], decoded: &Self, ctx: &Self::PrivateContext) -> Result<Vec<u8>, UnspecSignErr> {
+    fn sign(
+        obj: &[u8],
+        decoded: &Self,
+        ctx: &Self::PrivateContext,
+    ) -> Result<Vec<u8>, UnspecSignErr> {
         assert_eq!(decoded.signature_algo, SignatureAlgo::Ed25519);
         Ok(ctx.sign(obj).as_ref().to_vec())
     }
@@ -87,7 +97,12 @@ impl Signable for crate::pdus::Ticket {
 impl<'kp> Verifyable<'kp> for crate::pdus::Ticket {
     type PublicContext = ring::signature::UnparsedPublicKey<&'kp [u8]>;
 
-    fn verify(obj: &[u8], decoded: &Self, signature: &[u8], ctx: &Self::PublicContext) -> Result<(), UnspecSignErr> {
+    fn verify(
+        obj: &[u8],
+        decoded: &Self,
+        signature: &[u8],
+        ctx: &Self::PublicContext,
+    ) -> Result<(), UnspecSignErr> {
         if decoded.signature_algo != SignatureAlgo::Ed25519 {
             return Err(UnspecSignErr);
         }

@@ -30,6 +30,8 @@ default-features = false
 features = ["io", "sink"]
 
 [dependencies.futures_codec]
+git = "https://github.com/zserik/futures-codec.git"
+branch = "impl-stderror"
 version = "0.4"
 features = ["cbor"]
 
