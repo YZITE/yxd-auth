@@ -28,7 +28,7 @@ type ServerState = Arc<ServerStateInner>;
 
 struct ClAuthState {
     ident: String,
-    allow_expand: bool,
+    flags: pdus::PubkeyFlags,
     parent_ticket: Option<pdus::Ticket>,
 }
 
@@ -45,7 +45,7 @@ impl ClientData {
         now: &yxd_auth_core::UtcDateTime,
         sigt: yxd_auth_core::SignedObject<pdus::Ticket>,
         identchk: Fid,
-    ) -> ::std::result::Result<(pdus::Ticket, bool), ()>
+    ) -> ::std::result::Result<(pdus::Ticket, pdus::PubkeyFlags), ()>
     where
         Fid: FnOnce(&str) -> bool,
     {
@@ -63,7 +63,7 @@ impl ClientData {
                     tracing::warn!("client tried to use invalid or expired ticket");
                     return Err(());
                 }
-                let allow_expand = if let Some(pke) = ticket.pubkeys.get(&self.pubkey) {
+                let pkf = if let Some(pke) = ticket.pubkeys.get(&self.pubkey) {
                     if !pke.is_allowed(&self.peer_addr.ip()) {
                         tracing::warn!(
                             "client tried to use ticket from non-allowed IP {}",
@@ -71,12 +71,12 @@ impl ClientData {
                         );
                         return Err(());
                     }
-                    pke.flags.contains(pdus::PubkeyFlags::A_EXPAND)
+                    pke.flags
                 } else {
-                    false
+                    pdus::PubkeyFlags::empty()
                 };
                 ticket.ts_last_valid_chk = Some(now.clone());
-                Ok((ticket, allow_expand))
+                Ok((ticket, pkf))
             }
             Err(x) => {
                 tracing::warn!("unable to decode+verify ticket: {}", x);
@@ -106,16 +106,16 @@ impl ClientData {
                         // FIXME: check if the user password matches
                         ClAuthState {
                             ident: username,
-                            allow_expand: true,
+                            flags: PubkeyFlags::all(),
                             parent_ticket: None,
                         }
                     }
                     AuthCommand::Ticket(sigt) => {
                         let now = yxd_auth_core::Utc::now();
                         match self.check_ticket(&now, sigt, |_| true) {
-                            Ok((ticket, allow_expand)) => ClAuthState {
+                            Ok((ticket, flags)) => ClAuthState {
                                 ident: ticket.ident.clone(),
-                                allow_expand,
+                                flags,
                                 parent_ticket: Some(ticket),
                             },
                             Err(()) => return Response::PermissionDenied,
@@ -130,10 +130,13 @@ impl ClientData {
             Request::Acquire(acq) => {
                 // FIXME: admins should have SUDO rights; handle sudo
                 let auth_state = self.auth_state.as_ref().unwrap();
+                if !auth_state.flags.contains(PubkeyFlags::A_DERIVE) {
+                    return Response::PermissionDenied;
+                }
                 match acq.try_finish(
                     &now,
                     &self.srvstate.realm,
-                    if auth_state.allow_expand {
+                    if auth_state.flags.contains(PubkeyFlags::A_EXPAND) {
                         None
                     } else {
                         auth_state.parent_ticket.as_ref()
@@ -155,42 +158,40 @@ impl ClientData {
                 let auth_state = self.auth_state.as_ref().unwrap();
                 // FIXME: admins should have SUDO rights; handle sudo (sudo suppresses the ident check)
                 match self.check_ticket(&now, sigt, |id| id == &auth_state.ident) {
+                    Err(()) => Response::PermissionDenied,
+                    Ok((ticket, _)) if !ticket.is_renewable(&now) => Response::Failure,
+
                     Ok((mut ticket, _)) => {
-                        if ticket.is_renewable(&now) {
-                            let incr = if let Some(ivd) = ticket.ivd_valid_chk {
-                                match yxd_auth_core::chrono::Duration::from_std(ivd) {
-                                    Ok(x) => x,
-                                    Err(e) => {
-                                        tracing::warn!("client tried to renew ticket with invalid ivd_valid_chk duration: {}", e);
-                                        return Response::InvalidInvocation;
-                                    }
+                        let incr = if let Some(ivd) = ticket.ivd_valid_chk {
+                            match yxd_auth_core::chrono::Duration::from_std(ivd) {
+                                Ok(x) => x,
+                                Err(e) => {
+                                    tracing::warn!("client tried to renew ticket with invalid ivd_valid_chk duration: {}", e);
+                                    return Response::InvalidInvocation;
                                 }
-                            // FIXME: we should use the mean value of ivd and the default value
-                            } else {
-                                // FIXME: use a default value
-                                return Response::Unimplemented;
-                            };
-                            let ts_lt_renew_until = ticket
-                                .ts_lt_renew_until
-                                .clone()
-                                .unwrap()
-                                .checked_add_signed(incr);
-                            let ts_lt_until =
-                                ticket.ts_lt_until.clone().unwrap().checked_add_signed(incr);
-                            if ts_lt_renew_until.is_none() || ts_lt_until.is_none() {
-                                Response::Failure
-                            } else {
-                                ticket.ts_lt_renew_until = ts_lt_renew_until;
-                                ticket.ts_lt_until = ts_lt_until;
-                                self.sign_ticket(ticket)
                             }
+                        // FIXME: we should use the mean value of ivd and the default value
                         } else {
+                            // FIXME: use a default value
+                            return Response::Unimplemented;
+                        };
+                        let ts_lt_renew_until = ticket
+                            .ts_lt_renew_until
+                            .clone()
+                            .unwrap()
+                            .checked_add_signed(incr);
+                        let ts_lt_until =
+                            ticket.ts_lt_until.clone().unwrap().checked_add_signed(incr);
+                        if ts_lt_renew_until.is_none() || ts_lt_until.is_none() {
                             Response::Failure
+                        } else {
+                            ticket.ts_lt_renew_until = ts_lt_renew_until;
+                            ticket.ts_lt_until = ts_lt_until;
+                            self.sign_ticket(ticket)
                         }
                     }
-                    Err(()) => Response::PermissionDenied,
                 }
-            } //_ => Response::InvalidInvocation,
+            }
         }
     }
 }

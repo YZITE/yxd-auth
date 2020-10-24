@@ -10,8 +10,7 @@ bitflags! {
     #[derive(Deserialize, Serialize)]
     pub struct PubkeyFlags: u8 {
         const A_DERIVE     = 0b00000001;
-        const A_LIM_EXPAND = 0b00000010;
-        const A_EXPAND     = 0b00000100;
+        const A_EXPAND     = 0b00000010;
     }
 }
 
