@@ -28,7 +28,7 @@ features = ["alloc", "clock", "serde", "std"]
 [dependencies.futures-util]
 version = "0.3"
 default-features = false
-features = ["io", "sink"]
+features = ["io"]
 
 [dependencies.serde]
 version = "1.0"
