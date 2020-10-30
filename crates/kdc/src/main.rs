@@ -236,7 +236,7 @@ async fn handle_client(
         );
         let _enter = span.enter();
         while let Some(req) = s.try_recv().await? {
-            s.send(clientdat.handle_req(req)).await?;
+            s.send(&clientdat.handle_req(req)).await?;
         }
     }
 
@@ -244,6 +244,8 @@ async fn handle_client(
 }
 
 fn main() {
+    use futures_util::{future::FutureExt, stream::StreamExt, pin_mut};
+
     tracing_subscriber::fmt::init();
 
     let args: Vec<_> = std::env::args().collect();
@@ -267,19 +269,29 @@ fn main() {
         dhc: DHC.clone(),
     });
 
-    let (s, ctrl_c) = async_channel::bounded(2);
-    ctrlc::set_handler(move || {
-        let _ = s.try_send(());
-    })
-    .unwrap();
+    let s = event_listener::Event::new();
+    let ctrl_c = s.listen().fuse();
+    ctrlc::set_handler(move || s.notify(usize::MAX)).unwrap();
 
-    yxd_auth_core::block_on(|_| async move {
-        use futures_util::{future::FutureExt, stream::StreamExt};
+    let listen_addr = cfgf.listen.to_string();
 
-        let listener = async_net::TcpListener::bind(cfgf.listen.to_string())
+    yxd_auth_core::ServerExecutor::new().block_on(|ex| async move {
+        let listener = async_net::TcpListener::bind(listen_addr)
             .await
             .expect("unable to listen on port");
 
-        pin_mut(ctrl_c);
+        pin_mut!(ctrl_c);
+
+        loop {
+            let fut_accept = listener.accept().fuse();
+            pin_mut!(fut_accept);
+            futures_util::select! {
+                x = ctrl_c => break,
+                y = fut_accept => {
+                    let (stream, peer_addr) = y.expect("accept failed");
+                    ex.spawn(handle_client(srvstate.clone(), yzesc.clone(), stream, peer_addr)).detach();
+                }
+            };
+        }
     });
 }

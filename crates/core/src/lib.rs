@@ -21,25 +21,53 @@ pub use async_executor::Executor;
 pub use base64;
 pub use chrono;
 pub use ring;
+use event_listener::Event;
+use std::sync::Arc;
 
-/// Multithreaded `block_on` function
-pub fn block_on<F, I, R>(f: F) -> R
-where
-    F: FnOnce(&Executor<'_>) -> I,
-    I: std::future::Future<Output = R>,
-{
-    use futures_lite::future::block_on;
-    let ex = Executor::new();
-    let shutdown = event_listener::Event::new();
+pub struct ServerExecutor {
+    // the user shouldn't be able to clone the current object.
+    ex: Arc<Executor<'static>>,
 
-    easy_parallel::Parallel::new()
-        .each(0..num_cpus::get(), |_| block_on(ex.run(shutdown.listen())))
-        .finish(|| {
-            let ret = block_on(f(&ex));
-            shutdown.notify(usize::MAX);
-            ret
-        })
-        .1
+    shutdown: Event,
+}
+
+impl ServerExecutor {
+    pub fn new() -> Self {
+        let ret = Self {
+            ex: Arc::new(Executor::new()),
+            shutdown: Event::new(),
+        };
+
+        use futures_lite::future::block_on as fblon;
+        use std::thread::spawn;
+        for _ in 0..num_cpus::get() {
+            let ex = ret.ex.clone();
+            let listener = ret.shutdown.listen();
+            spawn(move || fblon(ex.run(listener)));
+        }
+
+        ret
+    }
+
+    /// Multithreaded `block_on` function
+    #[inline]
+    pub fn block_on<'x, F, I, R>(&'x mut self, f: F) -> R
+    where
+        F: FnOnce(&'x Executor<'static>) -> I,
+        I: std::future::Future<Output = R> + 'x,
+        R: 'x,
+    {
+        futures_lite::future::block_on(f(&*self.ex))
+    }
+}
+
+impl Drop for ServerExecutor {
+    fn drop(&mut self) {
+        // we don't rely on the fact that this destructor runs,
+        // as it only cleans up leftover resources
+        // if this doesn't run, we thus just waste some resources
+        self.shutdown.notify(usize::MAX);
+    }
 }
 
 pub fn prefix_match(a: &[u8], b: &[u8], prefixlen: u8) -> bool {

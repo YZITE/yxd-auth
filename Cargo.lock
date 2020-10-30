@@ -1305,7 +1305,6 @@ dependencies = [
 name = "yxd-auth-core"
 version = "0.0.0"
 dependencies = [
- "async-channel",
  "async-executor",
  "base64",
  "bitflags",
@@ -1333,7 +1332,6 @@ name = "yxd-auth-kdc"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "async-lock",
  "async-net",
  "ctrlc",
