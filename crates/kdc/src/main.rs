@@ -244,8 +244,6 @@ async fn handle_client(
 }
 
 fn main() {
-    use yxd_auth_kdc::ServerConfig;
-
     tracing_subscriber::fmt::init();
 
     let args: Vec<_> = std::env::args().collect();
@@ -255,7 +253,7 @@ fn main() {
     }
 
     let cfgf = std::fs::read(&args[1]).expect("unable to read config file");
-    let cfgf: ServerConfig = toml::from_slice(&cfgf[..]).expect("unable to parse config file");
+    let cfgf: yxd_auth_kdc::ServerConfig = toml::from_slice(&cfgf[..]).expect("unable to parse config file");
 
     let srvstate = Arc::new(ServerStateInner {
         realm: cfgf.realm,
@@ -269,5 +267,19 @@ fn main() {
         dhc: DHC.clone(),
     });
 
-    yxd_auth_core::block_on(|_| async move {});
+    let (s, ctrl_c) = async_channel::bounded(2);
+    ctrlc::set_handler(move || {
+        let _ = s.try_send(());
+    })
+    .unwrap();
+
+    yxd_auth_core::block_on(|_| async move {
+        use futures_util::{future::FutureExt, stream::StreamExt};
+
+        let listener = async_net::TcpListener::bind(cfgf.listen.to_string())
+            .await
+            .expect("unable to listen on port");
+
+        pin_mut(ctrl_c);
+    });
 }

@@ -315,6 +315,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b57a92e9749e10f25a171adcebfafe72991d45e7ec2dcb853e8f83d9dafaeb08"
+dependencies = [
+ "nix",
+ "winapi",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -358,46 +368,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d8e3078b7b2a8a671cb7a3d17b4760e4181ea243227776ba83fd043b4ca034e"
-dependencies = [
- "futures-channel",
- "futures-core",
- "futures-executor",
- "futures-io",
- "futures-sink",
- "futures-task",
- "futures-util",
-]
-
-[[package]]
-name = "futures-channel"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7a4d35f7401e948629c9c3d6638fb9bf94e0b2121e96c3b428cc4e631f3eb74"
-dependencies = [
- "futures-core",
- "futures-sink",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d674eaa0056896d5ada519900dbf97ead2e46a7b6621e8160d79e2f2e1e2784b"
-
-[[package]]
-name = "futures-executor"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc709ca1da6f66143b8c9bec8e6260181869893714e9b5a490b169b0414144ab"
-dependencies = [
- "futures-core",
- "futures-task",
- "futures-util",
-]
 
 [[package]]
 name = "futures-io"
@@ -459,31 +433,17 @@ version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a894a0acddba51a2d49a6f4263b1e64b8c579ece8af50fa86503d52cd1eea34"
 dependencies = [
- "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
  "futures-sink",
  "futures-task",
  "memchr",
- "pin-project",
+ "pin-project 0.4.27",
  "pin-utils",
  "proc-macro-hack",
  "proc-macro-nested",
  "slab",
-]
-
-[[package]]
-name = "futures_codec"
-version = "0.4.1"
-source = "git+https://github.com/zserik/futures-codec.git?branch=impl-stderror#279a8d9b57957eb1557a8d17d46295fd44f24e4c"
-dependencies = [
- "bytes",
- "futures",
- "memchr",
- "pin-project",
- "serde",
- "serde_cbor",
 ]
 
 [[package]]
@@ -602,6 +562,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83450fe6a6142ddd95fb064b746083fc4ef1705fe81f64a64e1d4b39f54a1055"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -660,7 +632,16 @@ version = "0.4.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ffbc8e94b38ea3d2d8ba92aea2983b503cd75d0888d75b86bb37970b5698e15"
 dependencies = [
- "pin-project-internal",
+ "pin-project-internal 0.4.27",
+]
+
+[[package]]
+name = "pin-project"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee41d838744f60d959d7074e3afb6b35c7456d0f61cad38a24e35e6553f73841"
+dependencies = [
+ "pin-project-internal 1.0.1",
 ]
 
 [[package]]
@@ -668,6 +649,17 @@ name = "pin-project-internal"
 version = "0.4.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65ad2ae56b6abe3a1ee25f15ee605bacadb9a764edaba9c2bf4103800d4a1895"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81a4ffa594b66bff340084d4081df649a7dc049ac8d7fc458d8e628bfbbb2f86"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1319,9 +1311,10 @@ dependencies = [
  "bitflags",
  "chrono",
  "easy-parallel",
+ "event-listener",
  "futures-lite",
+ "futures-micro",
  "futures-util",
- "futures_codec",
  "num_cpus",
  "ring",
  "serde",
@@ -1329,6 +1322,8 @@ dependencies = [
  "serde_cbor",
  "serde_derive",
  "thiserror",
+ "yz-futures-codec",
+ "yz-futures-util",
  "yz-glue-dhchoice",
  "zeroize",
 ]
@@ -1341,6 +1336,9 @@ dependencies = [
  "async-channel",
  "async-lock",
  "async-net",
+ "ctrlc",
+ "event-listener",
+ "futures-util",
  "serde",
  "toml",
  "tracing",
@@ -1366,6 +1364,37 @@ dependencies = [
  "yz-glue-dhchoice",
  "yz-packet-stream",
  "zeroize",
+]
+
+[[package]]
+name = "yz-futures-codec"
+version = "0.0.0"
+source = "git+https://github.com/YZITE/futures.git?branch=main#95b1dd1fdd50e63e05161a72022aa44ddc6b32c1"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-io",
+ "memchr",
+ "pin-project 1.0.1",
+ "serde",
+ "serde_cbor",
+ "thiserror",
+ "yz-futures-sink",
+]
+
+[[package]]
+name = "yz-futures-sink"
+version = "0.1.0"
+source = "git+https://github.com/YZITE/futures.git?branch=main#95b1dd1fdd50e63e05161a72022aa44ddc6b32c1"
+
+[[package]]
+name = "yz-futures-util"
+version = "0.0.0"
+source = "git+https://github.com/YZITE/futures.git?branch=main#95b1dd1fdd50e63e05161a72022aa44ddc6b32c1"
+dependencies = [
+ "futures-core",
+ "futures-micro",
+ "yz-futures-sink",
 ]
 
 [[package]]

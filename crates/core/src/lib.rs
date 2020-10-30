@@ -30,14 +30,13 @@ where
 {
     use futures_lite::future::block_on;
     let ex = Executor::new();
-    let (signal, shutdown) = async_channel::unbounded::<()>();
+    let shutdown = event_listener::Event::new();
 
     easy_parallel::Parallel::new()
-        .each(0..num_cpus::get(), |_| block_on(ex.run(shutdown.recv())))
+        .each(0..num_cpus::get(), |_| block_on(ex.run(signal.listen())))
         .finish(|| {
-            let ex = &ex;
-            let ret = block_on(f(ex));
-            std::mem::drop(signal);
+            let ret = block_on(f(&ex));
+            shutdown.notify(usize::MAX);
             ret
         })
         .1

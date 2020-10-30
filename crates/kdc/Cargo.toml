@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 async-channel = "1.5"
 async-lock = "2.3"
-async-net = "1.5"
+async-net = "1.5.0"
 anyhow = "1.0"
 serde = "1.0"
 toml = "0.5"
@@ -17,6 +17,9 @@ tracing = "0.1"
 tracing-subscriber = "0.2.4"
 yxd-auth-core = { path = "../core" }
 zeroize = "1.1"
+futures-util = "0.3.6"
+ctrlc = "3.1.7"
+event-listener = "2.5.1"
 
 [dependencies.yz-encsess]
 git = "https://github.com/YZITE/encsess2.git"
