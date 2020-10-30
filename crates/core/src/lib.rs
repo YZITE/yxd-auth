@@ -33,7 +33,7 @@ where
     let shutdown = event_listener::Event::new();
 
     easy_parallel::Parallel::new()
-        .each(0..num_cpus::get(), |_| block_on(ex.run(signal.listen())))
+        .each(0..num_cpus::get(), |_| block_on(ex.run(shutdown.listen())))
         .finish(|| {
             let ret = block_on(f(&ex));
             shutdown.notify(usize::MAX);
