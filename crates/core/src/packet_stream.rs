@@ -1,12 +1,12 @@
-use futures_codec::{CborCodec, Framed};
+use yz_futures_codec::{codec::Cbor, Framed};
 use futures_util::io::{AsyncRead, AsyncWrite};
-use futures_util::sink::SinkExt;
+use yz_futures_util::sink::SinkExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
-use std::{future::Future, marker::Unpin};
+use std::{future::Future, marker::Unpin, pin::Pin};
 
-pub struct PacketStream<S, Req, Resp>(Framed<S, CborCodec<Req, Resp>>);
-pub type Error = futures_codec::CborCodecError;
+pub struct PacketStream<S, Req, Resp>(Framed<S, Cbor<Req, Resp>>);
+pub type Error = yz_futures_codec::Error<serde_cbor::Error>;
 pub type Result<T> = ::std::result::Result<T, Error>;
 
 impl<S, Req, Resp> PacketStream<S, Req, Resp>
@@ -17,17 +17,18 @@ where
 {
     #[inline(always)]
     pub fn new(inner: S) -> Self {
-        Self(Framed::new(inner, CborCodec::new()))
+        Self(Framed::new(inner, Cbor::new()))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn flush(&mut self) -> impl Future<Output = Result<()>> + '_ {
-        self.0.flush()
+        let inner = &mut self.0;
+        futures_micro::poll_fn(move |cx| yz_futures_util::sink::FlushSink::poll_flush(Pin::new(inner), cx))
     }
 
     #[inline(always)]
-    pub fn send(&mut self, msg: Req) -> impl Future<Output = Result<()>> + '_ {
-        self.0.send(msg)
+    pub fn send<'a>(&'a mut self, msg: &'a Req) -> impl Future<Output = Result<()>> + 'a {
+        self.0.send_unpin(&msg)
     }
 
     #[inline(always)]
@@ -59,6 +60,6 @@ where
 {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut S {
-        &mut *self.0
+        self.0.inner_mut()
     }
 }
