@@ -18,6 +18,7 @@ toml = "0.5"
 tracing = "0.1"
 tracing-subscriber = "0.2.4"
 yxd-auth-core = { path = "../core" }
+yxd-server-executor = { path = "../server-executor" }
 zeroize = "1.1"
 
 [dependencies.yz-encsess]

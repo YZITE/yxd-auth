@@ -345,12 +345,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "easy-parallel"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dd4afd79212583ff429b913ad6605242ed7eec277e950b1438f300748f948f4"
-
-[[package]]
 name = "event-listener"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1303,16 +1297,11 @@ dependencies = [
 name = "yxd-auth-core"
 version = "0.0.0"
 dependencies = [
- "async-executor",
  "base64",
  "bitflags",
  "chrono",
- "easy-parallel",
- "event-listener",
- "futures-lite",
  "futures-micro",
  "futures-util",
- "num_cpus",
  "ring",
  "serde",
  "serde_bytes",
@@ -1340,8 +1329,19 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "yxd-auth-core",
+ "yxd-server-executor",
  "yz-encsess",
  "zeroize",
+]
+
+[[package]]
+name = "yxd-server-executor"
+version = "0.1.0"
+dependencies = [
+ "async-executor",
+ "event-listener",
+ "futures-lite",
+ "num_cpus",
 ]
 
 [[package]]

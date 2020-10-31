@@ -275,7 +275,7 @@ fn main() {
 
     let listen_addr = cfgf.listen.to_string();
 
-    yxd_auth_core::ServerExecutor::new().block_on(|ex| async move {
+    yxd_server_executor::ServerExecutor::new().block_on(|ex| async move {
         let listener = async_net::TcpListener::bind(listen_addr)
             .await
             .expect("unable to listen on port");
