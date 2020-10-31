@@ -3,10 +3,10 @@
 use anyhow::{anyhow, Context, Result};
 use async_lock::RwLock;
 use serde::{Deserialize, Serialize};
-use std::{sync::Arc, path::PathBuf};
+use std::{path::PathBuf, sync::Arc};
 use yxd_auth_core::pdus;
 use yxd_auth_core::ring::signature::{self, KeyPair};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const DHC: pdus::DHChoice = pdus::DHChoice::Ed25519;
 
@@ -33,6 +33,7 @@ struct ClAuthState {
     ident: String,
     flags: pdus::PubkeyFlags,
     parent_ticket: Option<pdus::Ticket>,
+    can_sudo: bool,
 }
 
 struct ClientData {
@@ -46,7 +47,7 @@ impl ClientData {
     fn check_ticket<Fid>(
         &self,
         now: &yxd_auth_core::UtcDateTime,
-        sigt: yxd_auth_core::SignedObject<pdus::Ticket>,
+        sigt: &yxd_auth_core::SignedObject<pdus::Ticket>,
         identchk: Fid,
     ) -> ::std::result::Result<(pdus::Ticket, pdus::PubkeyFlags), ()>
     where
@@ -98,43 +99,80 @@ impl ClientData {
         }
     }
 
-    fn handle_req(&mut self, req: pdus::Request) -> pdus::Response {
+    async fn handle_req(
+        &mut self,
+        req: pdus::Request,
+    ) -> Result<pdus::Response, db_::DbConnectionLost> {
         use pdus::*;
         let now = yxd_auth_core::Utc::now();
+        use sodiumoxide::crypto::pwhash::argon2id13 as pwhash;
 
-        match req {
+        macro_rules! ifail {
+            () => {
+                return Ok(Response::Failure);
+            };
+        };
+
+        Ok(match req {
             Request::Auth(a) => {
-                self.auth_state = Some(match a {
-                    AuthCommand::Password { username, .. } => {
-                        // FIXME: check if the user password matches
-                        ClAuthState {
-                            ident: username,
-                            flags: PubkeyFlags::all(),
-                            parent_ticket: None,
+                self.auth_state = Some(match &a {
+                    AuthCommand::Password {
+                        ref username,
+                        ref password,
+                    } => {
+                        if let Some(mut ui) = self.srvstate.get_user(username.clone()).await? {
+                            let can_sudo = ui.can_sudo;
+                            if !ui.hpwd.is_empty() {
+                                let mut hpw: Zeroizing<Vec<u8>> =
+                                    Vec::from(std::mem::take(&mut ui.hpwd)).into();
+                                // add padding
+                                let origlen = hpw.len();
+                                hpw.extend((origlen..128).map(|_| 0u8));
+                                // verify hash
+                                let pwmatch = match pwhash::HashedPassword::from_slice(&hpw[..]) {
+                                    Some(hp) => pwhash::pwhash_verify(&hp, &password[..]),
+                                    _ => false,
+                                };
+                                if !pwmatch {
+                                    ifail!();
+                                }
+                            } else {
+                                // FIXME: add a way to add admin accounts to an bootstrap tool
+                            }
+                            ClAuthState {
+                                ident: username.clone(),
+                                flags: PubkeyFlags::all(),
+                                parent_ticket: None,
+                                can_sudo,
+                            }
+                        } else {
+                            ifail!();
                         }
                     }
-                    AuthCommand::Ticket(sigt) => {
+                    AuthCommand::Ticket(ref sigt) => {
                         let now = yxd_auth_core::Utc::now();
                         match self.check_ticket(&now, sigt, |_| true) {
                             Ok((ticket, flags)) => ClAuthState {
                                 ident: ticket.ident.clone(),
                                 flags,
                                 parent_ticket: Some(ticket),
+                                // FIXME: maybe get this info from the database
+                                can_sudo: false,
                             },
-                            Err(()) => return Response::PermissionDenied,
+                            Err(()) => ifail!(),
                         }
                     }
                 });
                 Response::Success
             }
 
-            _ if self.auth_state.is_none() => Response::PermissionDenied,
+            _ if self.auth_state.is_none() => Response::Failure,
 
             Request::Acquire(acq) => {
                 // FIXME: admins should have SUDO rights; handle sudo
                 let auth_state = self.auth_state.as_ref().unwrap();
                 if !auth_state.flags.contains(PubkeyFlags::A_DERIVE) {
-                    return Response::PermissionDenied;
+                    ifail!();
                 }
                 match acq.try_finish(
                     &now,
@@ -160,8 +198,8 @@ impl ClientData {
             Request::Renew(sigt) => {
                 let auth_state = self.auth_state.as_ref().unwrap();
                 // FIXME: admins should have SUDO rights; handle sudo (sudo suppresses the ident check)
-                match self.check_ticket(&now, sigt, |id| id == &auth_state.ident) {
-                    Err(()) => Response::PermissionDenied,
+                match self.check_ticket(&now, &sigt, |id| id == &auth_state.ident) {
+                    Err(()) => Response::Failure,
                     Ok((ticket, _)) if !ticket.is_renewable(&now) => Response::Failure,
 
                     Ok((mut ticket, _)) => {
@@ -170,13 +208,13 @@ impl ClientData {
                                 Ok(x) => x,
                                 Err(e) => {
                                     tracing::warn!("client tried to renew ticket with invalid ivd_valid_chk duration: {}", e);
-                                    return Response::InvalidInvocation;
+                                    return Ok(Response::InvalidInvocation);
                                 }
                             }
                         // FIXME: we should use the mean value of ivd and the default value
                         } else {
                             // FIXME: use a default value
-                            return Response::Unimplemented;
+                            return Ok(Response::Unimplemented);
                         };
                         let ts_lt_renew_until = ticket
                             .ts_lt_renew_until
@@ -195,7 +233,7 @@ impl ClientData {
                     }
                 }
             }
-        }
+        })
     }
 }
 
@@ -239,7 +277,13 @@ async fn handle_client(
         );
         let _enter = span.enter();
         while let Some(req) = s.try_recv().await? {
-            s.send(&clientdat.handle_req(req)).await?;
+            s.send(
+                &clientdat
+                    .handle_req(req)
+                    .await
+                    .unwrap_or(pdus::Response::Failure),
+            )
+            .await?;
         }
     }
 
@@ -250,6 +294,7 @@ fn main() {
     use futures_util::{future::FutureExt, pin_mut, stream::StreamExt};
 
     tracing_subscriber::fmt::init();
+    sodiumoxide::init().unwrap();
 
     let args: Vec<_> = std::env::args().collect();
     if args.len() != 2 {
@@ -264,8 +309,10 @@ fn main() {
     let (db, dbchan_r) = async_channel::bounded(100);
 
     let dbpath = cfgf.dbpath;
-    let dbthread = std::thread::Builder::new().name("database".to_string())
-        .spawn(move || crate::db_::database_worker(dbpath, dbchan_r)).expect("unable to start database worker");
+    let dbthread = std::thread::Builder::new()
+        .name("database".to_string())
+        .spawn(move || crate::db_::database_worker(dbpath, dbchan_r))
+        .expect("unable to start database worker");
 
     let srvstate = Arc::new(ServerStateInner {
         db,

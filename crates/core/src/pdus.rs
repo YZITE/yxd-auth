@@ -276,11 +276,13 @@ impl AcquireTicketCommand {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, zeroize::Zeroize)]
+#[zeroize(drop)]
 pub enum AuthCommand {
     Password {
         username: String,
-        password: serde_bytes::ByteBuf,
+        #[serde(with = "serde_bytes")]
+        password: Vec<u8>,
     },
 
     Ticket(SignedObject<Ticket>),
@@ -313,7 +315,6 @@ pub enum Response {
     Unimplemented,
     InvalidInvocation,
     InvalidLifetime,
-    PermissionDenied,
     IdAlreadyInUse,
     Ticket(SignedObject<Ticket>),
 }
