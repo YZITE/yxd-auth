@@ -19,11 +19,13 @@ impl ServerExecutor {
         };
 
         use futures_lite::future::block_on as fblon;
-        use std::thread::spawn;
         for _ in 0..num_cpus::get() {
             let ex = ret.ex.clone();
             let listener = ret.shutdown.listen();
-            spawn(move || fblon(ex.run(listener)));
+            std::thread::Builder::new()
+                .name("yxd-srvexec-worker".to_string())
+                .spawn(move || fblon(ex.run(listener)))
+                .expect("unable to spawn worker threads");
         }
 
         ret
