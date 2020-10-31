@@ -3,16 +3,19 @@
 use anyhow::{anyhow, Context, Result};
 use async_lock::RwLock;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{sync::Arc, path::PathBuf};
 use yxd_auth_core::pdus;
 use yxd_auth_core::ring::signature::{self, KeyPair};
 use zeroize::Zeroize;
 
 const DHC: pdus::DHChoice = pdus::DHChoice::Ed25519;
 
+mod db_;
+
 struct ServerStateInner {
     realm: String,
     keypair_sign: signature::Ed25519KeyPair,
+    db: async_channel::Sender<db_::Message>,
 }
 
 impl ServerStateInner {
@@ -258,7 +261,14 @@ fn main() {
     let cfgf: yxd_auth_kdc::ServerConfig =
         toml::from_slice(&cfgf[..]).expect("unable to parse config file");
 
+    let (db, dbchan_r) = async_channel::bounded(100);
+
+    let dbpath = cfgf.dbpath;
+    let dbthread = std::thread::Builder::new().name("database".to_string())
+        .spawn(move || crate::db_::database_worker(dbpath, dbchan_r)).expect("unable to start database worker");
+
     let srvstate = Arc::new(ServerStateInner {
+        db,
         realm: cfgf.realm,
         keypair_sign: signature::Ed25519KeyPair::from_pkcs8(&*cfgf.keypair_sign)
             .expect("unable to parse signing keypair"),
@@ -294,5 +304,9 @@ fn main() {
                 }
             };
         }
+
+        std::mem::drop(srvstate);
     });
+
+    dbthread.join().unwrap();
 }
