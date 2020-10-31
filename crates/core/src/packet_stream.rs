@@ -1,9 +1,9 @@
-use yz_futures_codec::{codec::Cbor, Framed};
 use futures_util::io::{AsyncRead, AsyncWrite};
-use yz_futures_util::sink::SinkExt;
 use futures_util::stream::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use std::{future::Future, marker::Unpin, pin::Pin};
+use yz_futures_codec::{codec::Cbor, Framed};
+use yz_futures_util::sink::SinkExt;
 
 pub struct PacketStream<S, Req, Resp>(Framed<S, Cbor<Req, Resp>>);
 pub type Error = yz_futures_codec::Error<serde_cbor::Error>;
@@ -23,7 +23,9 @@ where
     #[inline]
     pub fn flush(&mut self) -> impl Future<Output = Result<()>> + '_ {
         let inner = &mut self.0;
-        futures_micro::poll_fn(move |cx| yz_futures_util::sink::FlushSink::poll_flush(Pin::new(inner), cx))
+        futures_micro::poll_fn(move |cx| {
+            yz_futures_util::sink::FlushSink::poll_flush(Pin::new(inner), cx)
+        })
     }
 
     #[inline(always)]

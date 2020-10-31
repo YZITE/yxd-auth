@@ -244,7 +244,7 @@ async fn handle_client(
 }
 
 fn main() {
-    use futures_util::{future::FutureExt, stream::StreamExt, pin_mut};
+    use futures_util::{future::FutureExt, pin_mut, stream::StreamExt};
 
     tracing_subscriber::fmt::init();
 
@@ -255,7 +255,8 @@ fn main() {
     }
 
     let cfgf = std::fs::read(&args[1]).expect("unable to read config file");
-    let cfgf: yxd_auth_kdc::ServerConfig = toml::from_slice(&cfgf[..]).expect("unable to parse config file");
+    let cfgf: yxd_auth_kdc::ServerConfig =
+        toml::from_slice(&cfgf[..]).expect("unable to parse config file");
 
     let srvstate = Arc::new(ServerStateInner {
         realm: cfgf.realm,
