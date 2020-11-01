@@ -31,9 +31,9 @@ type ServerState = Arc<ServerStateInner>;
 
 struct ClAuthState {
     ident: String,
+    uid: i64,
     flags: pdus::PubkeyFlags,
     parent_ticket: Option<pdus::Ticket>,
-    can_sudo: bool,
 }
 
 struct ClientData {
@@ -120,30 +120,20 @@ impl ClientData {
                         ref username,
                         ref password,
                     } => {
-                        if let Some(mut ui) = self.srvstate.get_user(username.clone()).await? {
-                            let can_sudo = ui.can_sudo;
-                            if !ui.hpwd.is_empty() {
-                                let mut hpw: Zeroizing<Vec<u8>> =
-                                    Vec::from(std::mem::take(&mut ui.hpwd)).into();
-                                // add padding
-                                let origlen = hpw.len();
-                                hpw.extend((origlen..128).map(|_| 0u8));
-                                // verify hash
-                                let pwmatch = match pwhash::HashedPassword::from_slice(&hpw[..]) {
-                                    Some(hp) => pwhash::pwhash_verify(&hp, &password[..]),
-                                    _ => false,
-                                };
-                                if !pwmatch {
-                                    ifail!();
+                        if let Some(uid) = self.srvstate.get_user(username.clone()).await? {
+                            if self
+                                .srvstate
+                                .check_user_login(uid, password.clone().into())
+                                .await?
+                            {
+                                ClAuthState {
+                                    ident: username.clone(),
+                                    uid,
+                                    flags: PubkeyFlags::all(),
+                                    parent_ticket: None,
                                 }
                             } else {
-                                // FIXME: add a way to add admin accounts to an bootstrap tool
-                            }
-                            ClAuthState {
-                                ident: username.clone(),
-                                flags: PubkeyFlags::all(),
-                                parent_ticket: None,
-                                can_sudo,
+                                ifail!();
                             }
                         } else {
                             ifail!();
@@ -152,13 +142,20 @@ impl ClientData {
                     AuthCommand::Ticket(ref sigt) => {
                         let now = yxd_auth_core::Utc::now();
                         match self.check_ticket(&now, sigt, |_| true) {
-                            Ok((ticket, flags)) => ClAuthState {
-                                ident: ticket.ident.clone(),
-                                flags,
-                                parent_ticket: Some(ticket),
-                                // FIXME: maybe get this info from the database
-                                can_sudo: false,
-                            },
+                            Ok((ticket, flags)) => {
+                                if let Some(uid) =
+                                    self.srvstate.get_user(ticket.ident.clone()).await?
+                                {
+                                    ClAuthState {
+                                        ident: ticket.ident.clone(),
+                                        uid,
+                                        flags,
+                                        parent_ticket: Some(ticket),
+                                    }
+                                } else {
+                                    ifail!();
+                                }
+                            }
                             Err(()) => ifail!(),
                         }
                     }
