@@ -1476,7 +1476,7 @@ dependencies = [
 [[package]]
 name = "yz-futures-codec"
 version = "0.0.0"
-source = "git+https://github.com/YZITE/futures.git?branch=main#95b1dd1fdd50e63e05161a72022aa44ddc6b32c1"
+source = "git+https://github.com/YZITE/futures.git?branch=main#d403778a895e4d74bd7f28bca641d9609b64297f"
 dependencies = [
  "bytes",
  "futures-core",
@@ -1492,12 +1492,12 @@ dependencies = [
 [[package]]
 name = "yz-futures-sink"
 version = "0.1.0"
-source = "git+https://github.com/YZITE/futures.git?branch=main#95b1dd1fdd50e63e05161a72022aa44ddc6b32c1"
+source = "git+https://github.com/YZITE/futures.git?branch=main#d403778a895e4d74bd7f28bca641d9609b64297f"
 
 [[package]]
 name = "yz-futures-util"
 version = "0.0.0"
-source = "git+https://github.com/YZITE/futures.git?branch=main#95b1dd1fdd50e63e05161a72022aa44ddc6b32c1"
+source = "git+https://github.com/YZITE/futures.git?branch=main#d403778a895e4d74bd7f28bca641d9609b64297f"
 dependencies = [
  "futures-core",
  "futures-micro",
