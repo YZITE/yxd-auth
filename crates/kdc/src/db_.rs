@@ -145,8 +145,8 @@ COMMIT;",
     )
     .expect("unable to create required db tables");
 
-    conn.execute("PRAGMA foreign_keys=on;", rusqlite::NO_PARAMS)
-        .expect("unable to enable constraint checking");
+    //conn.execute("PRAGMA foreign_keys=on;", rusqlite::NO_PARAMS)
+    //    .expect("unable to enable constraint checking");
 
     while let Ok(x) = block_on(reqs.recv()) {
         // NOTE: do never fail if the consumer (=ret) is gone
