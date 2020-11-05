@@ -68,10 +68,7 @@ fn handle_dbreq(conn: &rusqlite::Connection, req: Message) {
                 )
                 .optional()
                 .expect("SELECT uid failed");
-            let uid = match uid {
-                None => sendret!(ret, None),
-                Some(uid) => uid,
-            };
+            sendret!(ret, uid);
         }
         M::check_user_login { ret, uid, password } => {
             let mut stmt = conn
@@ -106,7 +103,7 @@ fn handle_dbreq(conn: &rusqlite::Connection, req: Message) {
             let row = conn
                 .prepare_cached("SELECT id FROM sudoers WHERE primid = ? AND (sudo_as IS NULL OR sudo_as = ?) LIMIT 1")
                 .expect("SELECT FROM sudoers: prepare failed")
-                .query_map(&[uid, sudo_as], |row| Ok(true))
+                .query_map(&[uid, sudo_as], |_| Ok(true))
                 .expect("SELECT FROM sudoers: query failed")
                 .next();
             sendret!(ret, row.is_some());
