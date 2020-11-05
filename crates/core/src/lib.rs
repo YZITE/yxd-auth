@@ -16,6 +16,8 @@ pub use packet_stream::{Error as PacketStreamError, PacketStream};
 mod base64key;
 pub use base64key::Base64Key;
 
+pub mod val64;
+
 // utilities
 pub use base64;
 pub use chrono;

@@ -1,3 +1,4 @@
+use yxd_auth_core::val64::{u2i as v64u2i, i2u as v64i2u};
 use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Clone, Debug, thiserror::Error)]
@@ -34,13 +35,15 @@ macro_rules! dbrpc {
 
 // FIXME: add a way to create users
 // FIXME: add a way to delete users
-// FIXME: add a query for sudoers
 // FIXME: add a way to add sudoers
 // FIXME: add a way to remove sudoers
+
+// TODO: handle invalidation of UIDs
 
 dbrpc! {
     get_user(user: String) -> Option<i64>;
     check_user_login(uid: i64, password: Zeroizing<Vec<u8>>) -> bool;
+    check_sudo_as(uid: i64, sudo_as: i64) -> bool;
 }
 
 macro_rules! sendret {
@@ -99,17 +102,22 @@ fn handle_dbreq(conn: &rusqlite::Connection, req: Message) {
 
             sendret!(ret, pw_matches);
         }
+        M::check_sudo_as { ret, uid, sudo_as } => {
+            let row = conn
+                .prepare_cached("SELECT id FROM sudoers WHERE primid = ? AND (sudo_as IS NULL OR sudo_as = ?) LIMIT 1")
+                .expect("SELECT FROM sudoers: prepare failed")
+                .query_map(&[uid, sudo_as], |row| Ok(true))
+                .expect("SELECT FROM sudoers: query failed")
+                .next();
+            sendret!(ret, row.is_some());
+        }
     }
 }
 
 pub fn database_worker(dbpath: std::path::PathBuf, reqs: async_channel::Receiver<Message>) {
     use futures_lite::future::block_on;
-    use rusqlite::{params, OptionalExtension, NO_PARAMS};
-    use sodiumoxide::crypto::pwhash::argon2id13 as pwhash;
-
     let conn = rusqlite::Connection::open(dbpath).expect("unable to open database");
 
-    // FIXME: add a sudoers table ($owner -> $sudo_as)
     conn.execute_batch(
         "BEGIN TRANSACTION;
 CREATE TABLE IF NOT EXISTS users (
@@ -137,7 +145,7 @@ COMMIT;",
     )
     .expect("unable to create required db tables");
 
-    conn.execute("PRAGMA foreign_keys=on;", NO_PARAMS)
+    conn.execute("PRAGMA foreign_keys=on;", rusqlite::NO_PARAMS)
         .expect("unable to enable constraint checking");
 
     while let Ok(x) = block_on(reqs.recv()) {

@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Context, Result};
 use async_lock::RwLock;
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, future::Future};
 use yxd_auth_core::pdus;
 use yxd_auth_core::ring::signature::{self, KeyPair};
 use zeroize::{Zeroize, Zeroizing};
@@ -41,25 +41,86 @@ struct ClientData {
     peer_addr: std::net::SocketAddr,
     pubkey: pdus::Pubkey,
     auth_state: Option<ClAuthState>,
+
+    // FIXME: attack vector: attacker could hold connection for a very long time
+    // TODO: implement TTL
+    uid_cache: HashMap<String, (Option<i64>, u8)>,
+}
+
+#[derive(PartialEq)]
+enum AllowAll {
+    Yes,
+    No,
 }
 
 impl ClientData {
-    fn check_ticket<Fid>(
-        &self,
+    async fn get_user_intern(srvstate: &ServerStateInner, uid_cache: &mut HashMap<String, (Option<i64>, u8)>, username: &str) -> Option<i64> {
+        use std::collections::hash_map::Entry;
+        let mut do_clup = false;
+        let ret = match uid_cache.entry(username.to_string()) {
+            Entry::Occupied(o) => o.into_mut(),
+            Entry::Vacant(v) => {
+                do_clup = true;
+                v.insert((srvstate.get_user(username.to_string()).await.unwrap_or(None), 20))
+            },
+        }.0;
+        if do_clup {
+            // do cleanup...
+            uid_cache.retain(|k, v| {
+                if v.1 > 0 {
+                    v.1 -= 1;
+                }
+                v.1 == 0
+            });
+        }
+        ret
+    }
+
+    fn get_user<'a>(&'a mut self, username: &'a str) -> impl Future<Output = Option<i64>> + 'a {
+        Self::get_user_intern(&self.srvstate, &mut self.uid_cache, username)
+    }
+
+    async fn handle_direct_sudo(&mut self, sudoer: &str) -> bool {
+        if let Some(ref user) = self.auth_state {
+            if sudoer == &user.ident {
+                return true;
+            }
+            match Self::get_user_intern(&self.srvstate, &mut self.uid_cache, sudoer).await {
+                Some(sudo_as) => self.srvstate.check_sudo_as(user.uid, sudo_as).await.unwrap_or(false),
+                None => false,
+            }
+        } else {
+            false
+        }
+    }
+
+    async fn handle_sudo(&mut self, sudoer: &Option<String>) -> bool {
+        match sudoer {
+            Some(ref x) => self.handle_direct_sudo(&*x).await,
+            None => true,
+        }
+    }
+
+    async fn check_ticket(
+        &mut self,
         now: &yxd_auth_core::UtcDateTime,
         sigt: &yxd_auth_core::SignedObject<pdus::Ticket>,
-        identchk: Fid,
-    ) -> ::std::result::Result<(pdus::Ticket, pdus::PubkeyFlags), ()>
-    where
-        Fid: FnOnce(&str) -> bool,
-    {
+        allow_all: AllowAll,
+    ) -> ::std::result::Result<(pdus::Ticket, pdus::PubkeyFlags), ()> {
         match sigt.decode_and_verify(&self.srvstate.signing_public_key()) {
             Ok(mut ticket) => {
-                if &ticket.realm != &self.srvstate.realm || !identchk(&ticket.ident) {
+                if ticket.realm != self.srvstate.realm {
                     tracing::warn!(
-                        "client passed ticket with invalid realm ('{}') or ident ('{:?}')",
-                        &ticket.realm,
-                        &ticket.ident
+                        "client passed ticket with invalid realm ('{}')",
+                        &ticket.realm
+                    );
+                    return Err(());
+                }
+                if !(allow_all == AllowAll::Yes || self.handle_direct_sudo(&ticket.ident).await) {
+                    tracing::warn!(
+                        "client passed ticket with invalid ident ('{:?}', realm = '{}')",
+                        &ticket.ident,
+                        &ticket.realm
                     );
                     return Err(());
                 }
@@ -120,7 +181,7 @@ impl ClientData {
                         ref username,
                         ref password,
                     } => {
-                        if let Some(uid) = self.srvstate.get_user(username.clone()).await? {
+                        if let Some(uid) = self.get_user(username).await {
                             if self
                                 .srvstate
                                 .check_user_login(uid, password.clone().into())
@@ -141,10 +202,10 @@ impl ClientData {
                     }
                     AuthCommand::Ticket(ref sigt) => {
                         let now = yxd_auth_core::Utc::now();
-                        match self.check_ticket(&now, sigt, |_| true) {
+                        match self.check_ticket(&now, sigt, AllowAll::Yes).await {
                             Ok((ticket, flags)) => {
                                 if let Some(uid) =
-                                    self.srvstate.get_user(ticket.ident.clone()).await?
+                                    self.get_user(&ticket.ident).await
                                 {
                                     ClAuthState {
                                         ident: ticket.ident.clone(),
@@ -166,7 +227,9 @@ impl ClientData {
             _ if self.auth_state.is_none() => Response::Failure,
 
             Request::Acquire(acq) => {
-                // FIXME: admins should have SUDO rights; handle sudo
+                if !self.handle_sudo(&acq.ident).await {
+                    ifail!();
+                }
                 let auth_state = self.auth_state.as_ref().unwrap();
                 if !auth_state.flags.contains(PubkeyFlags::A_DERIVE) {
                     ifail!();
@@ -187,15 +250,14 @@ impl ClientData {
             }
 
             Request::Revoke { .. } => {
-                // FIXME: implement revocation (requires database access)
+                // FIXME: implement revocation via database
                 // FIXME: admins should have SUDO rights; handle sudo
                 Response::Unimplemented
             }
 
             Request::Renew(sigt) => {
                 let auth_state = self.auth_state.as_ref().unwrap();
-                // FIXME: admins should have SUDO rights; handle sudo (sudo suppresses the ident check)
-                match self.check_ticket(&now, &sigt, |id| id == &auth_state.ident) {
+                match self.check_ticket(&now, &sigt, AllowAll::No).await {
                     Err(()) => Response::Failure,
                     Ok((ticket, _)) if !ticket.is_renewable(&now) => Response::Failure,
 
@@ -262,6 +324,7 @@ async fn handle_client(
             value: pubkey.to_vec(),
         },
         auth_state: None,
+        uid_cache: HashMap::new(),
     };
 
     // handle commands
