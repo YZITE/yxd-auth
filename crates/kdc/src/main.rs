@@ -43,7 +43,7 @@ struct ClientData {
     auth_state: Option<ClAuthState>,
 
     // FIXME: attack vector: attacker could hold connection for a very long time
-    // TODO: implement TTL
+    // TODO: implement max TTL with timestamp
     uid_cache: HashMap<String, (Option<i64>, u8)>,
 }
 
@@ -66,7 +66,7 @@ impl ClientData {
         }.0;
         if do_clup {
             // do cleanup...
-            uid_cache.retain(|k, v| {
+            uid_cache.retain(|_, v| {
                 if v.1 > 0 {
                     v.1 -= 1;
                 }
@@ -80,7 +80,7 @@ impl ClientData {
         Self::get_user_intern(&self.srvstate, &mut self.uid_cache, username)
     }
 
-    async fn handle_direct_sudo(&mut self, sudoer: &str) -> bool {
+    async fn handle_sudo(&mut self, sudoer: &str) -> bool {
         if let Some(ref user) = self.auth_state {
             if sudoer == &user.ident {
                 return true;
@@ -91,13 +91,6 @@ impl ClientData {
             }
         } else {
             false
-        }
-    }
-
-    async fn handle_sudo(&mut self, sudoer: &Option<String>) -> bool {
-        match sudoer {
-            Some(ref x) => self.handle_direct_sudo(&*x).await,
-            None => true,
         }
     }
 
@@ -116,7 +109,7 @@ impl ClientData {
                     );
                     return Err(());
                 }
-                if !(allow_all == AllowAll::Yes || self.handle_direct_sudo(&ticket.ident).await) {
+                if !(allow_all == AllowAll::Yes || self.handle_sudo(&ticket.ident).await) {
                     tracing::warn!(
                         "client passed ticket with invalid ident ('{:?}', realm = '{}')",
                         &ticket.ident,
@@ -166,7 +159,6 @@ impl ClientData {
     ) -> Result<pdus::Response, db_::DbConnectionLost> {
         use pdus::*;
         let now = yxd_auth_core::Utc::now();
-        use sodiumoxide::crypto::pwhash::argon2id13 as pwhash;
 
         macro_rules! ifail {
             () => {
@@ -227,8 +219,10 @@ impl ClientData {
             _ if self.auth_state.is_none() => Response::Failure,
 
             Request::Acquire(acq) => {
-                if !self.handle_sudo(&acq.ident).await {
-                    ifail!();
+                if let Some(ref x) = &acq.ident {
+                    if !self.handle_sudo(&*x).await {
+                        ifail!();
+                    }
                 }
                 let auth_state = self.auth_state.as_ref().unwrap();
                 if !auth_state.flags.contains(PubkeyFlags::A_DERIVE) {
@@ -256,7 +250,6 @@ impl ClientData {
             }
 
             Request::Renew(sigt) => {
-                let auth_state = self.auth_state.as_ref().unwrap();
                 match self.check_ticket(&now, &sigt, AllowAll::No).await {
                     Err(()) => Response::Failure,
                     Ok((ticket, _)) if !ticket.is_renewable(&now) => Response::Failure,
@@ -324,7 +317,7 @@ async fn handle_client(
             value: pubkey.to_vec(),
         },
         auth_state: None,
-        uid_cache: HashMap::new(),
+        uid_cache: HashMap::with_capacity(21),
     };
 
     // handle commands
@@ -351,7 +344,7 @@ async fn handle_client(
 }
 
 fn main() {
-    use futures_util::{future::FutureExt, pin_mut, stream::StreamExt};
+    use futures_util::{future::FutureExt, pin_mut};
 
     tracing_subscriber::fmt::init();
     sodiumoxide::init().unwrap();
