@@ -5,13 +5,16 @@ pub use chrono::Utc;
 
 pub mod error;
 
-mod signedobj;
-pub use signedobj::{Error as SignObjError, Signable, SignedObject};
+mod otimer;
+pub use otimer::OptionalTimer;
 
 pub mod pdus;
 
 mod packet_stream;
 pub use packet_stream::{Error as PacketStreamError, PacketStream};
+
+mod signedobj;
+pub use signedobj::{Error as SignObjError, Signable, SignedObject};
 
 mod base64key;
 pub use base64key::Base64Key;
