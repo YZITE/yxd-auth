@@ -2,7 +2,7 @@
 name = "yxd-auth-core"
 description = "YXD auth core library"
 version = "0.0.0"
-authors = ["Erik Zscheile <zseri.devel@ytrizja.de>"]
+authors = ["Alain Zscheile <fogti+devel@ytrizja.de>"]
 edition = "2018"
 license = "Apache-2.0 WITH LLVM-exception"
 
